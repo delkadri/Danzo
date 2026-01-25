@@ -1,0 +1,72 @@
+{
+  "sport": [
+    "Football", "Basketball", "Tennis", "Volleyball", "Baseball", "Hockey", "Rugby", "Cricket", "Boxing", "Karate",
+    "Judo", "Taekwondo", "Wrestling", "Swimming", "Running", "Marathon", "Cycling", "Skiing", "Snowboarding", "Skating",
+    "Gymnastics", "Handball", "Badminton", "Table Tennis", "Golf", "Fencing", "Archery", "Diving", "Rowing", "Canoeing",
+    "Surfing", "Skateboarding", "Climbing", "Weightlifting", "Powerlifting", "Triathlon", "Sprint", "Relay", "Long Jump", "High Jump",
+    "Pole Vault", "Shot Put", "Discus", "Javelin", "Football Goal", "Penalty", "Red Card", "Yellow Card", "Referee", "Coach",
+    "Captain", "Stadium", "Goalkeeper", "Striker", "Defender", "Midfielder", "Offside", "Corner Kick", "Free Kick", "Half Time",
+    "Overtime", "Knockout", "Final", "Semi Final", "Quarter Final", "League", "Tournament", "Medal", "Trophy", "Champion",
+    "Olympics", "World Cup", "Scoreboard", "Warm Up", "Training", "Workout", "Stretching", "Sprint Finish", "Lap", "Track",
+    "Court", "Ring", "Gloves", "Helmet", "Ball", "Racket", "Net", "Goal Post", "Whistle", "Fan",
+    "Teamwork", "Strategy", "Defense", "Attack", "Dribble", "Pass", "Serve", "Match Point", "Tie Break", "Fast Break"
+  ],
+  "song": [
+    "Happy Birthday", "Jingle Bells", "Let It Be", "Imagine", "Hey Jude", "Yesterday", "Billie Jean", "Thriller", "Smooth Criminal", "Beat It",
+    "Shape of You", "Perfect", "Bad Guy", "Blinding Lights", "Uptown Funk", "Rolling in the Deep", "Someone Like You", "Hello", "Skyfall", "Set Fire to the Rain",
+    "Bohemian Rhapsody", "We Will Rock You", "We Are the Champions", "Another One Bites the Dust", "Don't Stop Me Now", "Hotel California", "Take It Easy", "Stairway to Heaven", "Sweet Child O' Mine", "November Rain",
+    "Smells Like Teen Spirit", "Wonderwall", "Fix You", "Viva la Vida", "Clocks", "Yellow", "The Scientist", "Paradise", "Hymn for the Weekend", "A Sky Full of Stars",
+    "Bad Romance", "Poker Face", "Just Dance", "Born This Way", "Roar", "Firework", "Teenage Dream", "Dark Horse", "Shake It Off", "Blank Space",
+    "Love Story", "All Too Well", "Lose Yourself", "Not Afraid", "The Real Slim Shady", "Stan", "Numb", "In the End", "Crawling", "Somewhere I Belong",
+    "Counting Stars", "Demons", "Radioactive", "Believer", "Thunder", "Chandelier", "Cheap Thrills", "Lean On", "Sugar", "Animals",
+    "Despacito", "Havana", "Senorita", "Taki Taki", "Danza Kuduro", "Waka Waka", "Gangnam Style", "Dynamite", "Butter", "How You Like That",
+    "Stay", "Peaches", "Flowers", "As It Was", "Watermelon Sugar", "Drivers License", "Good 4 U", "Shallow", "Photograph", "Counting Crows"
+  ],
+  "movies": [
+    "Titanic", "Avatar", "Inception", "Interstellar", "The Dark Knight", "Batman Begins", "Joker", "Iron Man", "Avengers", "Endgame",
+    "Spider Man", "Doctor Strange", "Black Panther", "Thor", "Captain America", "Guardians of the Galaxy", "Star Wars", "The Empire Strikes Back", "Return of the Jedi", "The Force Awakens",
+    "Harry Potter", "The Philosopher's Stone", "Chamber of Secrets", "Prisoner of Azkaban", "The Lord of the Rings", "The Two Towers", "Return of the King", "The Hobbit", "The Matrix", "Matrix Reloaded",
+    "Gladiator", "Braveheart", "The Godfather", "The Godfather Part II", "Pulp Fiction", "Fight Club", "Forrest Gump", "The Shawshank Redemption", "Goodfellas", "The Green Mile",
+    "Toy Story", "Finding Nemo", "Monsters Inc", "The Incredibles", "Up", "Coco", "Frozen", "Moana", "Zootopia", "Inside Out",
+    "The Lion King", "Aladdin", "Beauty and the Beast", "Mulan", "Hercules", "Cars", "Ratatouille", "Wall E", "Kung Fu Panda", "Shrek",
+    "Jurassic Park", "Jaws", "E.T.", "Indiana Jones", "Back to the Future", "Terminator", "Terminator 2", "Rocky", "Rambo", "Die Hard",
+    "Home Alone", "The Mask", "Mean Girls", "The Notebook", "La La Land", "The Greatest Showman", "The Hunger Games", "Divergent", "The Fault in Our Stars", "Twilight",
+    "The Conjuring", "It", "A Quiet Place", "Scream", "Halloween", "The Ring", "The Sixth Sense", "Parasite", "Whiplash", "Django Unchained"
+  ],
+  "geography": [
+    "Paris", "London", "New York", "Tokyo", "Beijing", "Seoul", "Rome", "Madrid", "Berlin", "Lisbon",
+    "Moscow", "Kyiv", "Cairo", "Dubai", "Doha", "Riyadh", "Beirut", "Istanbul", "Athens", "Vienna",
+    "Prague", "Budapest", "Warsaw", "Stockholm", "Oslo", "Helsinki", "Copenhagen", "Dublin", "Edinburgh", "Amsterdam",
+    "Brussels", "Luxembourg", "Zurich", "Geneva", "Milan", "Naples", "Venice", "Florence", "Barcelona", "Valencia",
+    "Los Angeles", "San Francisco", "Chicago", "Miami", "Toronto", "Montreal", "Vancouver", "Mexico City", "Rio de Janeiro", "Sao Paulo",
+    "Buenos Aires", "Santiago", "Lima", "Bogota", "Havana", "Kingston", "Cape Town", "Johannesburg", "Nairobi", "Casablanca",
+    "Sydney", "Melbourne", "Brisbane", "Auckland", "Wellington", "Singapore", "Hong Kong", "Bangkok", "Hanoi", "Manila",
+    "India", "China", "Japan", "France", "Germany", "Spain", "Italy", "Portugal", "Brazil", "Canada",
+    "United States", "United Kingdom", "Australia", "South Africa", "Argentina", "Chile", "Peru", "Egypt", "Turkey", "Greece",
+    "Amazon River", "Nile River", "Mount Everest", "Sahara Desert", "Pacific Ocean", "Atlantic Ocean", "Mediterranean Sea", "Alps", "Himalayas", "Andes"
+  ],
+  "history": [
+    "Ancient Egypt", "Pharaoh", "Pyramids", "Cleopatra", "Roman Empire", "Julius Caesar", "Augustus", "Gladiators", "Colosseum", "Sparta",
+    "Athens", "Greek Mythology", "Alexander the Great", "Persian Empire", "Silk Road", "Vikings", "Medieval Times", "Knights", "Castles", "Crusades",
+    "Renaissance", "Leonardo da Vinci", "Michelangelo", "Printing Press", "Christopher Columbus", "Magellan", "French Revolution", "Bastille", "Napoleon", "Waterloo",
+    "Industrial Revolution", "Steam Engine", "Telephone", "Light Bulb", "World War I", "Trenches", "Armistice", "World War II", "D-Day", "Holocaust",
+    "Cold War", "Berlin Wall", "Space Race", "Moon Landing", "Sputnik", "United Nations", "Civil Rights", "Martin Luther King", "Apartheid", "Nelson Mandela",
+    "Titanic Ship", "Great Depression", "Stock Market Crash", "Pearl Harbor", "Hiroshima", "Nagasaki", "Vietnam War", "Korean War", "Gulf War", "Arab Spring",
+    "American Revolution", "Declaration of Independence", "George Washington", "Abraham Lincoln", "Ancient China", "Great Wall", "Terracotta Army", "Mongol Empire", "Genghis Khan", "Ottoman Empire",
+    "Sultan", "Byzantine Empire", "Constantinople", "Black Plague", "Feudalism", "Samurai", "Shogun", "Meiji Era", "Colonization", "Independence",
+    "Ancient India", "Maurya Empire", "Ashoka", "Buddhism", "Hinduism", "Islamic Golden Age", "Algebra", "Astronomy", "Cartography", "Explorers",
+    "King", "Queen", "Empire", "Battle", "Treaty", "Rebellion", "Invention", "Discovery", "Museum", "Timeline"
+  ],
+  "brand": [
+    "Apple", "Samsung", "Google", "Microsoft", "Amazon", "Netflix", "Disney", "Sony", "Nintendo", "PlayStation",
+    "Xbox", "Nike", "Adidas", "Puma", "Reebok", "Under Armour", "Coca Cola", "Pepsi", "McDonald's", "Burger King",
+    "KFC", "Starbucks", "Subway", "Dominos", "Pizza Hut", "IKEA", "Lego", "Hasbro", "Mattel", "Samsung Galaxy",
+    "iPhone", "MacBook", "Windows", "Android", "YouTube", "Instagram", "TikTok", "Snapchat", "Facebook", "WhatsApp",
+    "Uber", "Airbnb", "Booking", "Tesla", "BMW", "Mercedes", "Audi", "Toyota", "Honda", "Ford",
+    "Ferrari", "Lamborghini", "Porsche", "Renault", "Peugeot", "Citroen", "L'Oreal", "Sephora", "Gucci", "Louis Vuitton",
+    "Chanel", "Dior", "Zara", "H&M", "Uniqlo", "Decathlon", "Carrefour", "Auchan", "Walmart", "Target",
+    "Visa", "Mastercard", "PayPal", "Revolut", "N26", "LinkedIn", "Slack", "Discord", "Zoom", "Spotify",
+    "Red Bull", "Monster", "Nescafe", "Nutella", "Kinder", "Oreo", "Pringles", "Lay's", "Danone", "Nestle",
+    "Heineken", "Caterpillar", "Boeing", "Airbus", "Shell", "TotalEnergies", "Ibis", "Hilton", "Marriott", "Lacoste"
+  ]
+}
