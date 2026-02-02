@@ -7,7 +7,6 @@ import { Badge } from "../components/Badge";
 export default function Lobby({ myId, room, roomId, onLeave }) {
   const isHost = room?.host_id === myId;
   const players = room?.players || [];
-  const settings = room?.settings || { time_limit: 60, rounds: 5 };
 
   const teamSlots = Math.ceil(players.length / 2);
 
@@ -15,21 +14,22 @@ export default function Lobby({ myId, room, roomId, onLeave }) {
     Array.from({ length: teamSlots }, () => [])
   );
 
-  // non-host: follow backend draft teams
-    useEffect(() => {
+  // ✅ mobile selection state
+  const [selectedPlayerId, setSelectedPlayerId] = useState(null);
+
+  // non-host: follow backend draft teams live
+  useEffect(() => {
     const incoming = room?.draft_teams;
 
     if (Array.isArray(incoming)) {
-        // Ajuste le nombre de teams à l'écran
-        const next = Array.from({ length: teamSlots }, (_, i) => incoming[i] || []);
-        setDraftTeams(next);
+      const next = Array.from({ length: teamSlots }, (_, i) => incoming[i] || []);
+      setDraftTeams(next);
     } else {
-        setDraftTeams(Array.from({ length: teamSlots }, () => []));
+      setDraftTeams(Array.from({ length: teamSlots }, () => []));
     }
-    }, [room?.draft_teams, teamSlots]);
+  }, [room?.draft_teams, teamSlots]);
 
-
-  // host: ensure slots count + broadcast
+  // host: ensure slots count + broadcast (also dedupe/clean)
   useEffect(() => {
     if (!isHost) return;
 
@@ -47,42 +47,89 @@ export default function Lobby({ myId, room, roomId, onLeave }) {
     return players.filter((p) => !assigned.has(p.id));
   }, [players, assigned]);
 
-  const onDragStart = (e, playerId) => {
-    e.dataTransfer.setData("playerId", playerId);
+  // map id -> player
+  const playerById = useMemo(() => {
+    const m = new Map();
+    players.forEach((p) => m.set(p.id, p));
+    return m;
+  }, [players]);
+
+  const selectedPlayer = selectedPlayerId ? playerById.get(selectedPlayerId) : null;
+
+  const findPlayerTeamIndex = (pid) => {
+    for (let i = 0; i < draftTeams.length; i++) {
+      if (draftTeams[i]?.includes(pid)) return i;
+    }
+    return null;
   };
 
-  const allowDrop = (e) => e.preventDefault();
+  const broadcastIfHost = (next) => {
+    if (isHost) {
+      socket.emit("host_update_draft_teams", { room_id: roomId, draft_teams: next });
+    }
+  };
 
-  const dropToTeam = (e, teamIndex) => {
-    const playerId = e.dataTransfer.getData("playerId");
-    if (!playerId) return;
+  // tap player (toggle selection)
+  const selectPlayer = (pid) => {
+    if (!isHost) return;
+    setSelectedPlayerId((prev) => (prev === pid ? null : pid));
+  };
+
+  // move selected player to a team
+  const moveSelectedToTeam = (teamIndex) => {
+    if (!isHost) return;
+    if (!selectedPlayerId) return;
 
     setDraftTeams((prev) => {
-      const next = prev.map((t) => t.filter((id) => id !== playerId));
-      if (next[teamIndex].length >= 2) return prev;
-      next[teamIndex].push(playerId);
-
-      if (isHost) {
-        socket.emit("host_update_draft_teams", { room_id: roomId, draft_teams: next });
+      const next = prev.map((t) => (Array.isArray(t) ? [...t] : []));
+      // remove from anywhere
+      for (let i = 0; i < next.length; i++) {
+        next[i] = next[i].filter((id) => id !== selectedPlayerId);
       }
+      // add if room
+      if ((next[teamIndex] || []).length >= 2) return prev;
+      next[teamIndex].push(selectedPlayerId);
+
+      broadcastIfHost(next);
       return next;
+    });
+
+    setSelectedPlayerId(null);
+  };
+
+  // move selected player to unassigned
+  const moveSelectedToUnassigned = () => {
+    if (!isHost) return;
+    if (!selectedPlayerId) return;
+
+    setDraftTeams((prev) => {
+      const next = prev.map((t) => (Array.isArray(t) ? [...t] : []));
+      for (let i = 0; i < next.length; i++) {
+        next[i] = next[i].filter((id) => id !== selectedPlayerId);
+      }
+      broadcastIfHost(next);
+      return next;
+    });
+
+    setSelectedPlayerId(null);
+  };
+
+  // ✅ kick player (admin)
+  const kickPlayer = (playerId) => {
+    if (!isHost) return;
+    if (!playerId) return;
+
+    // if you kick someone selected, clear selection
+    setSelectedPlayerId((prev) => (prev === playerId ? null : prev));
+
+    socket.emit("host_kick_player", {
+      room_id: roomId,
+      player_id: playerId,
     });
   };
 
-  const dropToUnassigned = (e) => {
-    const playerId = e.dataTransfer.getData("playerId");
-    if (!playerId) return;
-
-    setDraftTeams((prev) => {
-      const next = prev.map((t) => t.filter((id) => id !== playerId));
-      if (isHost) {
-        socket.emit("host_update_draft_teams", { room_id: roomId, draft_teams: next });
-      }
-      return next;
-    });
-  };
-
-  const allTeamsComplete = draftTeams.every((t) => t.length === 2);
+  // start conditions
+  const allTeamsComplete = draftTeams.every((t) => (t || []).length === 2);
   const allPlayersAssigned = assigned.size === players.length;
   const canStart =
     isHost &&
@@ -110,194 +157,255 @@ export default function Lobby({ myId, room, roomId, onLeave }) {
     return () => socket.off("teams_saved", onTeamsSaved);
   }, [isHost, roomId]);
 
-  // settings (host only)
-  const updateTime = (val) => {
-    const n = Number(val);
-    if (!Number.isFinite(n)) return;
-    socket.emit("host_update_settings", {
-      room_id: roomId,
-      time_limit: n,
-      rounds: settings.rounds,
-    });
-  };
+  const rulesText = "40s per turn • First team to reach 50+ wins.";
 
-  const updateRounds = (val) => {
-    const n = Number(val);
-    if (!Number.isFinite(n)) return;
-    socket.emit("host_update_settings", {
-      room_id: roomId,
-      time_limit: settings.time_limit,
-      rounds: n,
-    });
-  };
+  // styles helpers
+  const dropBase = "rounded-2xl bg-zinc-950 border transition";
+  const dropNormal = "border-zinc-800";
+  const dropActive = "border-indigo-600/70 ring-2 ring-indigo-600/25";
 
-  const copyCode = async () => {
-    await navigator.clipboard.writeText(roomId);
-  };
+  const chipWrap = "relative";
+  const chipBase =
+    "px-4 py-3 rounded-2xl border cursor-pointer active:scale-[0.98] transition select-none";
+  const chipNormal = "border-zinc-800 bg-zinc-900/40";
+  const chipAdmin = "border-indigo-700/50 bg-indigo-700/10";
+  const chipSelected =
+    "border-indigo-500/60 bg-indigo-500/10 ring-2 ring-indigo-500/20";
+
+  const kickBtn =
+    "absolute -top-2 -right-2 w-7 h-7 rounded-full border border-zinc-800 bg-zinc-950 text-zinc-300 hover:text-white hover:border-rose-500/40 hover:bg-rose-500/10 flex items-center justify-center text-sm leading-none";
+
+  const selectedHint = isHost
+    ? selectedPlayer
+      ? `Selected: ${selectedPlayer.name} — tap a Team or Unassigned`
+      : "Tap a player, then tap a Team (or Unassigned)"
+    : "Waiting for admin to create teams and start…";
 
   return (
-    <Card className="p-5 sm:p-6">
-      {/* Header inside card */}
-      <div className="flex items-start justify-between gap-3">
-        <div>
-          <div className="text-2xl font-black">Lobby</div>
+    <div className="pb-24 sm:pb-0">
+      <Card className="p-4 sm:p-6">
+        {/* Header */}
+        <div className="flex items-start justify-between gap-3">
+          <div className="min-w-0">
+            <div className="text-2xl font-black">Lobby</div>
 
-          <div className="mt-2 flex items-center gap-2">
-            <div className="text-sm text-zinc-400">Room code:</div>
-            <div className="font-mono text-lg font-black tracking-widest text-zinc-200">
-              {roomId}
+            {/* Room code hero (no COPY button now) */}
+            <div className="mt-3 flex items-center gap-3">
+              <div className="min-w-0">
+                <div className="text-xs text-zinc-500">ROOM CODE</div>
+                <div className="font-mono text-3xl sm:text-4xl font-black tracking-[0.35em] text-zinc-100">
+                  {roomId}
+                </div>
+              </div>
             </div>
-            <Button variant="ghost" onClick={copyCode}>
-              Copy
-            </Button>
+
+            <div className="mt-2 text-xs text-zinc-500">{rulesText}</div>
+
+            <div className={`mt-3 text-sm ${isHost ? "text-zinc-300" : "text-zinc-400"}`}>
+              <b>{selectedHint}</b>
+            </div>
           </div>
 
-          {isHost ? (
-            <div className="text-sm text-zinc-400 mt-2">
-              <b>Drag players into teams of 2, then start the game.</b>
-            </div>
-          ) : (
-            <div className="text-sm text-zinc-400 mt-2">
-              Waiting for admin to create teams and start…
-            </div>
-          )}
+          {/* Leave inside card */}
+          <Button variant="danger" onClick={onLeave}>
+            Leave
+          </Button>
         </div>
 
-        {/* ✅ Leave inside card (top-right) */}
-        <Button variant="danger" onClick={onLeave}>
-          Leave
-        </Button>
-      </div>
+        {/* Unassigned */}
+        <div className="mt-6">
+          <div className="text-sm text-zinc-400 mb-2">Unassigned players</div>
 
-      {/* Unassigned */}
-      <div className="mt-6">
-        <div className="text-sm text-zinc-400 mb-2">Unassigned players</div>
+          <div
+            className={`${dropBase} p-4 min-h-[88px] ${
+              isHost && selectedPlayerId ? dropActive : dropNormal
+            }`}
+            onClick={() => {
+              if (!isHost) return;
+              if (!selectedPlayerId) return;
+              moveSelectedToUnassigned();
+            }}
+          >
+            <div className="flex flex-wrap gap-2">
+              {unassignedPlayers.length === 0 ? (
+                <Badge className="text-zinc-400">All assigned ✅</Badge>
+              ) : (
+                unassignedPlayers.map((p) => {
+                  const isSelected = selectedPlayerId === p.id;
+                  const isAdmin = p.id === room?.host_id;
 
-        <div
-          className="p-3 rounded-2xl bg-zinc-950 border border-zinc-800"
-          onDrop={dropToUnassigned}
-          onDragOver={allowDrop}
-        >
-          <div className="flex flex-wrap gap-2">
-            {unassignedPlayers.length === 0 ? (
-              <Badge className="text-zinc-400">All assigned ✅</Badge>
-            ) : (
-              unassignedPlayers.map((p) => (
-                <div
-                  key={p.id}
-                  draggable={isHost}
-                  onDragStart={(e) => onDragStart(e, p.id)}
-                  className={`px-3 py-2 rounded-xl border ${
-                    p.id === room?.host_id
-                      ? "border-indigo-700/50 bg-indigo-700/10"
-                      : "border-zinc-800 bg-zinc-900/40"
-                  } cursor-move`}
-                >
-                  <div className="flex items-center gap-2">
-                    <span className="font-semibold">{p.name}</span>
-                    {p.id === room?.host_id && <Badge>ADMIN</Badge>}
-                    {p.id === myId && (
-                      <Badge className="bg-indigo-700/40 border-indigo-700">
-                        YOU
-                      </Badge>
-                    )}
-                  </div>
-                </div>
-              ))
+                  return (
+                    <div key={p.id} className={chipWrap}>
+                      <div
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          selectPlayer(p.id);
+                        }}
+                        className={[
+                          chipBase,
+                          isSelected ? chipSelected : isAdmin ? chipAdmin : chipNormal,
+                        ].join(" ")}
+                      >
+                        <div className="flex items-center gap-2">
+                          <span className="font-semibold text-base">{p.name}</span>
+                          {isAdmin && <Badge>ADMIN</Badge>}
+                          {p.id === myId && (
+                            <Badge className="bg-indigo-700/40 border-indigo-700">
+                              YOU
+                            </Badge>
+                          )}
+                        </div>
+                      </div>
+
+                      {/* ✅ Kick button (admin only, cannot kick self) */}
+                      {isHost && p.id !== myId && (
+                        <button
+                          className={kickBtn}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            kickPlayer(p.id);
+                          }}
+                          aria-label={`Kick ${p.name}`}
+                          title={`Kick ${p.name}`}
+                        >
+                          ✕
+                        </button>
+                      )}
+                    </div>
+                  );
+                })
+              )}
+            </div>
+
+            {isHost && selectedPlayerId && (
+              <div className="mt-3 text-xs text-zinc-500">
+                Tap here to move selected player back to <b>Unassigned</b>.
+              </div>
             )}
           </div>
         </div>
-      </div>
 
-      {/* Teams */}
-      <div className="mt-6">
-        <div className="text-sm text-zinc-400 mb-2">Teams</div>
+        {/* Teams */}
+        <div className="mt-6">
+          <div className="text-sm text-zinc-400 mb-2">Teams</div>
 
-        <div className="grid sm:grid-cols-2 gap-3">
-          {draftTeams.map((t, idx) => (
-            <div
-              key={idx}
-              className="p-4 rounded-2xl bg-zinc-950 border border-zinc-800"
-              onDrop={(e) => dropToTeam(e, idx)}
-              onDragOver={allowDrop}
-            >
-              <div className="flex items-center justify-between">
-                <div className="font-bold">Team {idx + 1}</div>
-                <Badge>{t.length}/2</Badge>
-              </div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            {draftTeams.map((t, idx) => {
+              const team = Array.isArray(t) ? t : [];
+              const canDropHere =
+                isHost &&
+                !!selectedPlayerId &&
+                team.length < 2 &&
+                findPlayerTeamIndex(selectedPlayerId) !== idx;
 
-              <div className="mt-3 flex flex-wrap gap-2">
-                {t.length === 0 ? (
-                  <Badge className="text-zinc-400">Drop here</Badge>
-                ) : (
-                  t.map((pid) => {
-                    const p = players.find((x) => x.id === pid);
-                    return (
-                      <div
-                        key={pid}
-                        draggable={isHost}
-                        onDragStart={(e) => onDragStart(e, pid)}
-                        className="px-3 py-2 rounded-xl border border-zinc-800 bg-zinc-900/40 cursor-move"
-                      >
-                        <span className="font-semibold">
-                          {p?.name || pid.slice(0, 6)}
-                        </span>
+              return (
+                <div
+                  key={idx}
+                  className={`p-4 min-h-[130px] ${dropBase} ${
+                    canDropHere ? dropActive : dropNormal
+                  }`}
+                  onClick={() => {
+                    if (!isHost) return;
+                    if (!selectedPlayerId) return;
+                    moveSelectedToTeam(idx);
+                  }}
+                >
+                  <div className="flex items-center justify-between">
+                    <div className="font-bold text-base">Team {idx + 1}</div>
+                    <Badge>{team.length}/2</Badge>
+                  </div>
+
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    {team.length === 0 ? (
+                      <div className="text-sm text-zinc-500">
+                        {isHost
+                          ? selectedPlayerId
+                            ? "Tap to place selected player"
+                            : "Tap a player above, then tap this team"
+                          : "Waiting…"}
                       </div>
-                    );
-                  })
-                )}
-              </div>
-            </div>
-          ))}
-        </div>
-      </div>
+                    ) : (
+                      team.map((pid) => {
+                        const p = playerById.get(pid);
+                        const isSelected = selectedPlayerId === pid;
 
-      {/* ✅ Admin bottom controls */}
-      {isHost && (
-        <div className="mt-7">
-          {/* ✅ settings ABOVE Start */}
-          <div className="grid grid-cols-2 gap-3">
-            <div className="p-4 rounded-2xl bg-zinc-950 border border-zinc-800">
-              <div className="text-xs text-zinc-500">Time (seconds)</div>
-              <input
-                className="mt-2 w-full bg-transparent border border-zinc-800 rounded-xl px-3 py-2"
-                type="number"
-                min={20}
-                max={180}
-                value={settings.time_limit}
-                onChange={(e) => updateTime(e.target.value)}
-              />
-            </div>
+                        return (
+                          <div key={pid} className={chipWrap}>
+                            <div
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                selectPlayer(pid);
+                              }}
+                              className={[
+                                chipBase,
+                                isSelected ? chipSelected : chipNormal,
+                              ].join(" ")}
+                            >
+                              <span className="font-semibold text-base">
+                                {p?.name || pid.slice(0, 6)}
+                              </span>
+                            </div>
 
-            <div className="p-4 rounded-2xl bg-zinc-950 border border-zinc-800">
-              <div className="text-xs text-zinc-500">Rounds</div>
-              <input
-                className="mt-2 w-full bg-transparent border border-zinc-800 rounded-xl px-3 py-2"
-                type="number"
-                min={1}
-                max={20}
-                value={settings.rounds}
-                onChange={(e) => updateRounds(e.target.value)}
-              />
-            </div>
+                            {/* ✅ Kick button (admin only, cannot kick self) */}
+                            {isHost && pid !== myId && (
+                              <button
+                                className={kickBtn}
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  kickPlayer(pid);
+                                }}
+                                aria-label={`Kick ${p?.name || "player"}`}
+                                title={`Kick ${p?.name || "player"}`}
+                              >
+                                ✕
+                              </button>
+                            )}
+                          </div>
+                        );
+                      })
+                    )}
+                  </div>
+
+                  {isHost && selectedPlayerId && (
+                    <div className="mt-3 text-xs text-zinc-500">
+                      Tap team card to move selected player here.
+                    </div>
+                  )}
+                </div>
+              );
+            })}
           </div>
+        </div>
 
-          {/* ✅ start button under settings */}
-          <div className="mt-4">
+        {/* Host validation message */}
+        {isHost && !canStart && (
+          <div className="mt-4 text-xs text-zinc-500">
+            {players.length % 2 !== 0
+              ? "⚠️ Players count must be even to create teams of 2."
+              : "Assign all players into complete teams (2/2) to start."}
+          </div>
+        )}
+      </Card>
+
+      {/* Sticky bottom bar (mobile) */}
+      {isHost && (
+        <div className="fixed bottom-0 left-0 right-0 p-3 sm:hidden">
+          <div className="mx-auto max-w-xl rounded-2xl border border-zinc-800 bg-zinc-950/90 backdrop-blur px-3 py-3">
             <Button className="w-full" onClick={startGame} disabled={!canStart}>
               Start game
             </Button>
-
-            {!canStart && (
-              <div className="text-xs text-zinc-500 mt-2">
-                {players.length % 2 !== 0
-                  ? "⚠️ Players count must be even to create teams of 2."
-                  : "Assign all players into complete teams (2/2) to start."}
-              </div>
-            )}
           </div>
         </div>
       )}
-    </Card>
+
+      {/* Desktop host start button */}
+      {isHost && (
+        <div className="hidden sm:block mt-4">
+          <Button className="w-full" onClick={startGame} disabled={!canStart}>
+            Start game
+          </Button>
+        </div>
+      )}
+    </div>
   );
 }

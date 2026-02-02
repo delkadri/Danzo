@@ -14,8 +14,12 @@ export default function App() {
   const [room, setRoom] = useState(null);
   const [view, setView] = useState("home"); // home | lobby | game
 
+  // ✅ small modern banner message (ex: kicked)
+  const [systemMsg, setSystemMsg] = useState("");
+
   const leaveRoom = () => {
-    if (roomId) socket.emit("leave_room", { room_id: roomId });
+    const rid = roomId;
+    if (rid) socket.emit("leave_room", { room_id: rid });
     setRoomId(null);
     setRoom(null);
     setView("home");
@@ -30,6 +34,7 @@ export default function App() {
       setRoomId(rid);
       setView("lobby");
       setRoom((prev) => prev || { room_id: rid });
+      setSystemMsg(""); // clear banner if any
     };
 
     const onRoomState = (payload) => {
@@ -60,12 +65,24 @@ export default function App() {
       alert(payload?.message || "Unknown error");
     };
 
+    // ✅ when admin kicks you
+    const onKicked = (payload) => {
+      // payload can include message/room_id if you want (optional)
+      setSystemMsg(payload?.message || "An admin removed you from the room.");
+
+      // reset local state to return to home
+      setRoomId(null);
+      setRoom(null);
+      setView("home");
+    };
+
     socket.on("connected", onConnected);
     socket.on("room_joined", onRoomJoined);
     socket.on("room_state", onRoomState);
     socket.on("game_started", onGameStarted);
     socket.on("game_end", onGameEnd);
     socket.on("error", onError);
+    socket.on("kicked", onKicked);
 
     return () => {
       socket.off("connected", onConnected);
@@ -74,6 +91,7 @@ export default function App() {
       socket.off("game_started", onGameStarted);
       socket.off("game_end", onGameEnd);
       socket.off("error", onError);
+      socket.off("kicked", onKicked);
     };
   }, []);
 
@@ -99,15 +117,28 @@ export default function App() {
   return (
     <div className="min-h-screen p-4 sm:p-6 max-w-6xl mx-auto">
       {/* HEADER */}
-        <div className="mb-5 flex items-center justify-between">
+      <div className="mb-5 flex items-center justify-between">
         <div>
-            <div className="text-2xl font-black">Ziago</div>
-            <div className="text-sm text-zinc-400">
-            {roomId ? `Room: ${roomId}` : ""}
-            </div>
+          <div className="text-2xl font-black">Play Danzo</div>
+          <div className="text-sm text-zinc-400">{roomId ? `Room: ${roomId}` : ""}</div>
         </div>
-        </div>
+      </div>
 
+      {/* ✅ System banner (kicked, etc.) */}
+      {systemMsg && (
+        <div className="mb-4 rounded-2xl border border-rose-500/30 bg-rose-500/10 px-4 py-3 text-sm text-zinc-200 flex items-start justify-between gap-3">
+          <div className="min-w-0">
+            <div className="font-bold">Removed from the room</div>
+            <div className="text-zinc-300">{systemMsg}</div>
+          </div>
+          <button
+            onClick={() => setSystemMsg("")}
+            className="shrink-0 rounded-xl border border-zinc-800 bg-zinc-950 px-3 py-1 text-xs text-zinc-200 hover:border-zinc-700"
+          >
+            OK
+          </button>
+        </div>
+      )}
 
       {view === "home" && <Home />}
 

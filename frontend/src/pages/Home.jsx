@@ -23,7 +23,6 @@ export default function Home() {
 
   return (
     <Card className="p-6">
-      <div className="text-2xl font-black">Play Ziago</div>
       <div className="text-sm text-zinc-400 mt-1">
         Guess words in teams of 2.
       </div>

@@ -35,9 +35,14 @@ Restart
 docker compose up
 
 ### idée pas importante :
+- choose the difficulty
+- Admin can remove a player in the lobby befor starting the game
+- logo in the ranking very ugly
 - Change le bouton copy par le logo
 - mettre mes cordonnées quelque part (credits)
 - chnager les couleurs de UI (plus clair?)
+- enlever des detailles
+- la case des mots change de couleur lorsque c'est validé
 
 ### changement : 
-- au lieu de mettre : Waiting for next describer to press Start Turn… met le nickname du describer à laplace du mot describer
+

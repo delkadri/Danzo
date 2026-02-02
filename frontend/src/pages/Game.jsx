@@ -1,27 +1,46 @@
-import { useEffect, useMemo, useState, useRef } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { socket } from "../lib/socket";
 import { Card } from "../components/Card";
 import { Button } from "../components/Button";
-import { Input } from "../components/Input";
 import { Badge } from "../components/Badge";
 import { categoryLabel } from "../lib/utils";
+
+const EMPTY_BOXES = Array.from({ length: 5 }, () => ({
+  text: "",
+  status: "empty", // empty | exact | close | wrong
+  locked: false,   // ✅ lock only exact now
+}));
+
+function boxClass(box, isGuesser) {
+  if (box.status === "exact")
+    return "border-emerald-500/50 bg-emerald-500/10 ring-2 ring-emerald-500/15";
+  if (box.status === "close")
+    return "border-yellow-500/50 bg-yellow-500/10 ring-2 ring-yellow-500/15";
+  if (box.status === "wrong")
+    return "border-rose-500/30 bg-rose-500/5";
+
+  return isGuesser
+    ? "border-zinc-800 bg-zinc-950 focus-within:border-indigo-500/50 focus-within:ring-2 focus-within:ring-indigo-500/15"
+    : "border-zinc-800 bg-zinc-950";
+}
 
 export default function Game({ myId, room, roomId, onLeave }) {
   const [remaining, setRemaining] = useState(null);
 
-  // ✅ Guess boxes UI
-  const [selectedBox, setSelectedBox] = useState(0);
-  const [boxes, setBoxes] = useState(
-    Array.from({ length: 5 }, () => ({ text: "", status: "empty", locked: false }))
-  );
-
-  const [liveTyping, setLiveTyping] = useState("");
+  // ✅ 5 boxes visible to everyone; guesser edits them directly
+  const [boxes, setBoxes] = useState(EMPTY_BOXES);
 
   // ✅ local immediate response for start turn UI
   const [localTurnStarted, setLocalTurnStarted] = useState(false);
 
-  const inputRef = useRef(null);
-  
+  // ✅ 3s countdown after category chosen
+  const [countdown, setCountdown] = useState(null); // number | null
+  const [countdownCat, setCountdownCat] = useState(null);
+
+  // debounce submit per box
+  const submitTimersRef = useRef({});
+  const inputRefs = useRef(Array.from({ length: 5 }, () => null));
+
   const ct = room?.current_turn || {};
   const phase = room?.phase || "playing";
   const players = room?.players || [];
@@ -31,11 +50,17 @@ export default function Game({ myId, room, roomId, onLeave }) {
 
   const isDescriber = myId === describerId;
   const isGuesser = myId === guesserId;
+  const isHost = room?.host_id === myId;
 
   const categoryOptions = ct.category_options || [];
   const chosenCategory = ct.chosen_category;
+  const words = ct.words || [];
 
-  const words = ct.words || []; // visible to everyone except guesser UI
+  // ✅ last turn summary (words + points)
+  const lastTurnSummary = room?.last_turn_summary || room?.last_turn || null;
+  const lastTurnWords = Array.isArray(lastTurnSummary?.words) ? lastTurnSummary.words : [];
+  const lastTurnPoints =
+    typeof lastTurnSummary?.points === "number" ? lastTurnSummary.points : null;
 
   // keep local state synced
   useEffect(() => {
@@ -50,89 +75,123 @@ export default function Game({ myId, room, roomId, onLeave }) {
     return players.find((p) => p.id === guesserId)?.name || "Guesser";
   }, [players, guesserId]);
 
+  // helper: turn team players ids -> names
+  const playerNameById = useMemo(() => {
+    const m = new Map();
+    for (const p of players) m.set(p.id, p.name);
+    return (id) => m.get(id) || (typeof id === "string" ? id.slice(0, 6) : "—");
+  }, [players]);
+
   // reset UI when new turn changes (team change)
   useEffect(() => {
     setRemaining(null);
-    setLiveTyping("");
     setLocalTurnStarted(!!ct.turn_started);
-    setSelectedBox(0);
-    setBoxes(Array.from({ length: 5 }, () => ({ text: "", status: "empty", locked: false })));
+    setBoxes(EMPTY_BOXES);
+    setCountdown(null);
+    setCountdownCat(null);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ct.team_id, ct.turn_number]);
 
   useEffect(() => {
     function onTimerUpdate(payload) {
-      setRemaining(payload?.remaining ?? null);
+      const r = payload?.remaining;
+      setRemaining(typeof r === "number" ? r : null);
     }
 
-    function onTyping(payload) {
-      setLiveTyping(payload?.text || "");
-    }
-
-    // ✅ FIX: server confirms turn started
     function onTurnStarted() {
       setLocalTurnStarted(true);
     }
 
     function onTurnEnded() {
-      setLiveTyping("");
       setLocalTurnStarted(false);
-      // keep boxes as-is
+      setCountdown(null);
+      setCountdownCat(null);
     }
 
-    // ✅ Apply result directly to selected box (no feed)
-    function onGuessResult(payload) {
-      const result = payload?.result; // exact | close | wrong
-      const points = payload?.points || 0;
+    // ✅ backend broadcasts the 5 texts live to everyone
+    function onGuessBoxesUpdate(payload) {
+      const incoming = payload?.boxes;
+      if (!Array.isArray(incoming)) return;
 
-      // If wrong or empty => do nothing (as requested)
-      if (!(result === "exact" || result === "close") || points <= 0) return;
+      setBoxes((prev) =>
+        prev.map((b, i) => ({
+          ...b,
+          text: typeof incoming[i] === "string" ? incoming[i] : (b.text || ""),
+        }))
+      );
+    }
+
+    // ✅ backend returns per-box status (exact/close/wrong)
+    function onGuessBoxResult(payload) {
+      const idx = payload?.index;
+      const status = payload?.status; // exact | close | wrong | ""
+
+      if (typeof idx !== "number" || idx < 0 || idx > 4) return;
 
       setBoxes((prev) => {
         const next = [...prev];
-        const idx = selectedBox;
+        const cur = next[idx] || { text: "", status: "empty", locked: false };
 
-        if (!next[idx] || next[idx].locked) return prev;
+        // ✅ lock ONLY exact (green). close (yellow) stays editable.
+        const shouldLock = status === "exact";
+
+        // if backend sends empty status, keep previous status unless empty
+        const nextStatus =
+          status === "exact" || status === "close" || status === "wrong"
+            ? status
+            : (cur.text ? cur.status : "empty");
 
         next[idx] = {
-          ...next[idx],
-          status: result === "exact" ? "exact" : "close",
-          locked: true,
+          ...cur,
+          status: nextStatus,
+          locked: shouldLock ? true : false,
         };
-
         return next;
-      });
-
-      // auto go to next empty unlocked box
-      setSelectedBox((prevIdx) => {
-        for (let i = 0; i < 5; i++) {
-          if (!boxes[i]?.locked && boxes[i]?.status === "empty" && boxes[i]?.text === "") {
-            return i;
-          }
-        }
-        // fallback: first unlocked
-        for (let i = 0; i < 5; i++) {
-          if (!boxes[i]?.locked) return i;
-        }
-        return prevIdx;
       });
     }
 
+    // ✅ start 3s countdown after category chosen (for everyone)
+    function onCategoryChosen(payload) {
+      const cat = payload?.category || chosenCategory;
+      setCountdownCat(cat || null);
+
+      setBoxes(EMPTY_BOXES);
+      setRemaining(null);
+
+      setCountdown(3);
+      let c = 3;
+      const t = setInterval(() => {
+        c -= 1;
+        if (c <= 0) {
+          clearInterval(t);
+          setCountdown(null);
+          return;
+        }
+        setCountdown(c);
+      }, 1000);
+    }
+
     socket.on("timer_update", onTimerUpdate);
-    socket.on("guess_typing_update", onTyping);
     socket.on("turn_started", onTurnStarted);
     socket.on("turn_ended", onTurnEnded);
-    socket.on("guess_result", onGuessResult);
+
+    socket.on("guess_boxes_update", onGuessBoxesUpdate);
+    socket.on("guess_box_result", onGuessBoxResult);
+
+    socket.on("category_chosen", onCategoryChosen);
 
     return () => {
       socket.off("timer_update", onTimerUpdate);
-      socket.off("guess_typing_update", onTyping);
       socket.off("turn_started", onTurnStarted);
       socket.off("turn_ended", onTurnEnded);
-      socket.off("guess_result", onGuessResult);
+
+      socket.off("guess_boxes_update", onGuessBoxesUpdate);
+      socket.off("guess_box_result", onGuessBoxResult);
+
+      socket.off("category_chosen", onCategoryChosen);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedBox]);
+  }, []);
 
   const turnStarted = !!ct.turn_started || localTurnStarted;
 
@@ -144,31 +203,40 @@ export default function Game({ myId, room, roomId, onLeave }) {
     socket.emit("choose_category", { room_id: roomId, category: cat });
   };
 
-  // Guess input actions
-  const updateSelectedText = (val) => {
+  // ✅ Guesser typing: auto-submit debounced
+  const updateBoxText = (index, val) => {
     setBoxes((prev) => {
       const next = [...prev];
-      if (!next[selectedBox] || next[selectedBox].locked) return prev;
-      next[selectedBox] = { ...next[selectedBox], text: val };
+      if (!next[index] || next[index].locked) return prev;
+      next[index] = { ...next[index], text: val };
       return next;
     });
 
-    // broadcast typing to everyone (as required)
-    socket.emit("guess_typing", { room_id: roomId, text: val });
-  };
+    if (!isGuesser) return;
 
-  const submitSelectedGuess = () => {
-    const text = boxes[selectedBox]?.text?.trim() || "";
-    if (!text) return;
+    socket.emit("guess_boxes_typing", { room_id: roomId, index, text: val });
 
-    socket.emit("submit_guess", { room_id: roomId, guess: text });
+    const timers = submitTimersRef.current;
+    if (timers[index]) clearTimeout(timers[index]);
 
-    // do NOT clear immediately: if wrong, keep it visible (user friendly)
-    // but stop live typing if user wants:
-    socket.emit("guess_typing", { room_id: roomId, text: "" });
+    timers[index] = setTimeout(() => {
+      socket.emit("submit_guess_box", { room_id: roomId, index, guess: val });
+    }, 220);
   };
 
   const ranking = room?.ranking || [];
+
+  // ✅ UI phase control
+  const inCountdown = typeof countdown === "number";
+  const roundActive = !!chosenCategory && !inCountdown;
+  const showTurnControl = phase === "playing" && !roundActive && !inCountdown;
+
+  const onPlayAgain = () => {
+    // primary
+    socket.emit("host_play_again", { room_id: roomId });
+    // fallback (if your backend uses another name)
+    socket.emit("play_again", { room_id: roomId });
+  };
 
   return (
     <div className="grid gap-4">
@@ -201,103 +269,160 @@ export default function Game({ myId, room, roomId, onLeave }) {
             )}
           </div>
 
-            {remaining !== null && (
+          {/* ✅ show timer only during active round */}
+          {roundActive && typeof remaining === "number" && (
             <div className="text-lg font-black">⏱ {remaining}s</div>
-            )}
+          )}
         </div>
 
         {/* ✅ Ranking stays until next describer presses Start Turn */}
         {(phase === "ranking" || phase === "results") && (
-          <Card className="p-5 mt-5">
-            <div className="text-xl font-black mb-2">
-              {phase === "results" ? "Final Ranking" : "Ranking"}
-            </div>
+          <>
+            <Card className="p-5 mt-5">
+              <div className="text-xl font-black mb-2">
+                {phase === "results" ? "Final Ranking" : "Ranking"}
+              </div>
 
-            <div className="space-y-2">
-              {ranking.map((r, idx) => (
-                <div
-                  key={r.team_id}
-                  className="p-3 rounded-xl bg-zinc-950 border border-zinc-800 flex justify-between"
-                >
-                  <div className="flex gap-2 items-center">
-                    <Badge>#{idx + 1}</Badge>
-                    <span className="text-sm text-zinc-400">
-                      Team {r.team_id + 1}
-                    </span>
+              <div className="space-y-2">
+                {ranking.length === 0 ? (
+                  <div className="text-sm text-zinc-400">
+                    Waiting for teams…
                   </div>
-                  <span className="font-black">{r.score}</span>
-                </div>
-              ))}
-            </div>
+                ) : (
+                  ranking.map((r, idx) => {
+                    const p1 = r?.players?.[0];
+                    const p2 = r?.players?.[1];
+                    const names =
+                      p1 && p2 ? `${playerNameById(p1)} & ${playerNameById(p2)}` : "—";
 
-            {phase !== "results" && isDescriber && (
-              <div className="mt-4">
-                <Button className="w-full" onClick={startTurn}>
-                  Start Turn
-                </Button>
-                <div className="text-xs text-zinc-500 mt-2">
-                  Ranking will stay until you start the next turn.
-                </div>
+                    return (
+                      <div
+                        key={r.team_id}
+                        className="p-3 rounded-xl bg-zinc-950 border border-zinc-800 flex justify-between"
+                      >
+                        <div className="flex gap-2 items-center">
+                          <Badge>#{idx + 1}</Badge>
+                          <div className="flex flex-col">
+                            <span className="text-sm text-zinc-300 font-semibold">
+                              Team {r.team_id + 1}: {names}
+                            </span>
+                            <span className="text-xs text-zinc-500">
+                              Score
+                            </span>
+                          </div>
+                        </div>
+                        <span className="font-black">{r.score}</span>
+                      </div>
+                    );
+                  })
+                )}
               </div>
-            )}
 
-            {phase !== "results" && !isDescriber && (
-              <div className="mt-4 text-sm text-zinc-400">
-                Waiting for next describer to press <b>Start Turn</b>…
-              </div>
+              {phase !== "results" && isDescriber && (
+                <div className="mt-4">
+                  <Button className="w-full" onClick={startTurn}>
+                    Start Turn
+                  </Button>
+                </div>
+              )}
+
+              {phase !== "results" && !isDescriber && (
+                <div className="mt-4 text-sm text-zinc-400">
+                  Waiting for <b>{describerName}</b> to press <b>Start Turn</b>…
+                </div>
+              )}
+
+              {/* ✅ Play again only for admin at end */}
+              {phase === "results" && isHost && (
+                <div className="mt-4">
+                  <Button className="w-full" onClick={onPlayAgain}>
+                    Play again
+                  </Button>
+                </div>
+              )}
+            </Card>
+
+            {/* ✅ After each turn: show words + points */}
+            {phase === "ranking" && lastTurnWords.length > 0 && (
+              <Card className="p-5 mt-4">
+                <div className="flex items-center justify-between">
+                  <div className="text-lg font-black">Words</div>
+                  {typeof lastTurnPoints === "number" && (
+                    <div className="text-sm text-zinc-300">
+                      Points: <b className="text-zinc-100">{lastTurnPoints}</b>
+                    </div>
+                  )}
+                </div>
+
+                <div className="mt-3 grid md:grid-cols-2 gap-2">
+                  {lastTurnWords.map((w) => (
+                    <div
+                      key={w}
+                      className="p-3 rounded-xl border border-zinc-800 bg-zinc-950"
+                    >
+                      <div className="font-semibold">{w}</div>
+                    </div>
+                  ))}
+                </div>
+              </Card>
             )}
-          </Card>
+          </>
         )}
 
         {/* PLAYING */}
         {phase === "playing" && (
           <div className="mt-5 grid gap-4">
-            <Card className="p-5">
-              <div className="font-bold mb-2">Turn Control</div>
+            {/* ✅ ONLY turn control BEFORE the round */}
+            {showTurnControl && (
+              <Card className="p-5">
+                <div className="font-bold mb-2">Turn Control</div>
 
-              {!turnStarted && isDescriber && (
-                <Button onClick={startTurn}>Start Turn</Button>
-              )}
+                {!turnStarted && isDescriber && (
+                  <Button onClick={startTurn}>Start Turn</Button>
+                )}
 
-              {!turnStarted && !isDescriber && (
-                <div className="text-sm text-zinc-400">
-                  Waiting for describer to press <b>Start Turn</b>…
-                </div>
-              )}
-
-              {turnStarted && !chosenCategory && isDescriber && (
-                <div className="mt-4">
-                  <div className="text-sm text-zinc-400 mb-2">
-                    Pick a category (1 out of 2)
+                {!turnStarted && !isDescriber && (
+                  <div className="text-sm text-zinc-400">
+                    Waiting for <b>{describerName}</b> to press <b>Start Turn</b>…
                   </div>
-                  <div className="flex flex-wrap gap-2">
-                    {categoryOptions.map((cat) => (
-                      <Button key={cat} onClick={() => chooseCategory(cat)}>
-                        {categoryLabel(cat)}
-                      </Button>
-                    ))}
+                )}
+
+                {turnStarted && !chosenCategory && isDescriber && (
+                  <div className="mt-4">
+                    <div className="text-sm text-zinc-400 mb-2">
+                      Pick a category (1 out of 2)
+                    </div>
+                    <div className="flex flex-wrap gap-2">
+                      {categoryOptions.map((cat) => (
+                        <Button key={cat} onClick={() => chooseCategory(cat)}>
+                          {categoryLabel(cat)}
+                        </Button>
+                      ))}
+                    </div>
                   </div>
-                </div>
-              )}
+                )}
 
-              {turnStarted && !chosenCategory && !isDescriber && (
-                <div className="mt-4 text-sm text-zinc-400">
-                  Waiting for describer to choose category…
-                </div>
-              )}
-
-              {chosenCategory && (
-                <div className="mt-4">
-                  <div className="text-sm text-zinc-400">Category</div>
-                  <div className="text-xl font-black">
-                    {categoryLabel(chosenCategory)}
+                {turnStarted && !chosenCategory && !isDescriber && (
+                  <div className="mt-4 text-sm text-zinc-400">
+                    Waiting for <b>{describerName}</b> to choose category…
                   </div>
-                </div>
-              )}
-            </Card>
+                )}
+              </Card>
+            )}
 
-            {/* ✅ WORDS visible to everyone EXCEPT the current guesser */}
-            {!isGuesser && words && words.length > 0 && (
+            {/* ✅ COUNTDOWN 3s visible to everyone */}
+            {inCountdown && (
+              <Card className="p-6 text-center">
+                <div className="text-sm text-zinc-400">Category</div>
+                <div className="text-2xl font-black mt-1">
+                  {countdownCat ? categoryLabel(countdownCat) : "Starting…"}
+                </div>
+                <div className="text-5xl font-black mt-4">{countdown}</div>
+              </Card>
+            )}
+
+            {/* ✅ WORDS visible to spectators + describer ONLY during active round */}
+            {roundActive && !isGuesser && words && words.length > 0 && (
               <Card className="p-5">
                 <div className="font-bold mb-3">
                   Words (visible to spectators + describer)
@@ -316,82 +441,83 @@ export default function Game({ myId, room, roomId, onLeave }) {
               </Card>
             )}
 
-            {/* ✅ GUESSER UI (5 boxes, no feed, no scoreboard) */}
-            <Card className="p-5">
-              <div className="font-bold mb-2">Guesser</div>
-
-              {!isGuesser ? (
-                <div className="text-sm text-zinc-400">
-                  Live typing:{" "}
-                  <span className="font-semibold text-zinc-200">
-                    {liveTyping || "..."}
-                  </span>
+            {/* ✅ GUESSER CARD only during active round */}
+            {roundActive && (
+              <Card className="p-5">
+                <div className="flex items-center justify-between">
+                  <div className="font-bold">Guesser</div>
+                  <div className="text-xs text-zinc-500">
+                    {isGuesser ? "Type directly in the boxes" : "Live guesses"}
+                  </div>
                 </div>
-              ) : (
-                <>
-                  <div className="text-sm text-zinc-400 mb-3">
-                    Tap a box, type your guess, and send.
-                  </div>
 
-                  {/* boxes */}
-                  <div className="grid grid-cols-5 gap-2">
-                    {boxes.map((b, idx) => {
-                      const isSelected = idx === selectedBox;
+                <div className="mt-4 grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  {boxes.map((b, idx) => (
+                    <div
+                      key={idx}
+                      className={`p-4 rounded-2xl border transition ${boxClass(
+                        b,
+                        isGuesser
+                      )}`}
+                      onClick={() => {
+                        if (!isGuesser) return;
+                        inputRefs.current[idx]?.focus?.();
+                      }}
+                    >
+                      <div className="flex items-center justify-between">
+                        <div className="text-xs text-zinc-500">Word #{idx + 1}</div>
 
-                      const statusClass =
-                        b.status === "exact"
-                          ? "border-green-500/40 bg-green-500/10"
+                        {b.status === "exact" && (
+                          <Badge className="border-emerald-600/50 bg-emerald-600/10">
+                            +2
+                          </Badge>
+                        )}
+                        {b.status === "close" && (
+                          <Badge className="border-yellow-600/50 bg-yellow-600/10">
+                            +1
+                          </Badge>
+                        )}
+                      </div>
+
+                      {isGuesser ? (
+                        <input
+                          ref={(el) => (inputRefs.current[idx] = el)}
+                          className="mt-2 w-full bg-transparent outline-none text-base sm:text-lg font-semibold placeholder:text-zinc-700"
+                          placeholder="Type here…"
+                          value={b.text}
+                          onChange={(e) => updateBoxText(idx, e.target.value)}
+                          disabled={b.locked} // ✅ only exact locks
+                          autoComplete="off"
+                          autoCorrect="off"
+                          spellCheck={false}
+                          inputMode="text"
+                        />
+                      ) : (
+                        <div className="mt-2 text-base sm:text-lg font-semibold text-zinc-200 min-h-[28px]">
+                          {b.text ? (
+                            b.text
+                          ) : (
+                            <span className="text-zinc-700">…</span>
+                          )}
+                        </div>
+                      )}
+
+                      <div className="mt-2 text-[11px] text-zinc-500">
+                        {b.status === "exact"
+                          ? "Exact"
                           : b.status === "close"
-                          ? "border-yellow-500/40 bg-yellow-500/10"
-                          : isSelected
-                          ? "border-indigo-500/40 bg-indigo-500/10"
-                          : "border-zinc-800 bg-zinc-950";
-
-                      return (
-                        <button
-                          key={idx}
-                          onClick={() => {
-                            setSelectedBox(idx);
-                            setTimeout(() => inputRef.current?.focus(), 0);
-                            }}
-                          className={`p-3 rounded-xl border text-left min-h-[56px] ${statusClass}`}
-                        >
-                          <div className="text-xs text-zinc-500">#{idx + 1}</div>
-                          <div className="text-sm font-semibold truncate">
-                            {b.text || "—"}
-                          </div>
-                        </button>
-                      );
-                    })}
-                  </div>
-
-                  {/* input for selected box */}
-                  <div className="mt-4 flex gap-2">
-                    <input
-                        ref={inputRef}
-                        className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-3 py-2 outline-none"
-                        placeholder={`Word #${selectedBox + 1}`}
-                        value={boxes[selectedBox]?.text || ""}
-                        onChange={(e) => updateSelectedText(e.target.value)}
-                        onKeyDown={(e) => {
-                        if (e.key === "Enter") submitSelectedGuess();
-                        }}
-                        disabled={boxes[selectedBox]?.locked}
-                        autoComplete="off"
-                        inputMode="text"
-                    />
-
-                    <Button onClick={submitSelectedGuess} disabled={boxes[selectedBox]?.locked}>
-                        Send
-                    </Button>
+                          ? "1–2 typos (editable)"
+                          : ""}
+                      </div>
                     </div>
+                  ))}
+                </div>
 
-                  <div className="mt-2 text-xs text-zinc-500">
-                    ✅ Exact match = green (+2) • 1-2 typos = yellow (+1)
-                  </div>
-                </>
-              )}
-            </Card>
+                <div className="mt-3 text-xs text-zinc-500">
+                  ✅ Exact = green (+2) • 1–2 typos = yellow (+1)
+                </div>
+              </Card>
+            )}
           </div>
         )}
       </Card>
