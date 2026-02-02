@@ -35,16 +35,59 @@ ROOMS: Dict[str, Dict[str, Any]] = {}
 # -----------------------------
 # Helpers
 # -----------------------------
+def teams_are_valid(room: Dict[str, Any]) -> bool:
+    teams = room.get("teams", [])
+    if not isinstance(teams, list) or not teams:
+        return False
+    for t in teams:
+        ps = t.get("players")
+        if not isinstance(ps, list) or len(ps) != 2:
+            return False
+    return True
+
+def points_multiplier(difficulty: str) -> float:
+    d = (difficulty or "medium").lower()
+    if d == "easy":
+        return 0.5
+    if d == "hard":
+        return 2.0
+    return 1.0
+
 def load_words() -> None:
     global WORDS_DB
     with open(WORDS_PATH, "r", encoding="utf-8") as f:
         WORDS_DB = json.load(f)
 
+    required_diffs = ["easy", "medium", "hard"]
+
     for cat in ALL_CATEGORIES:
         if cat not in WORDS_DB:
             raise ValueError(f"Missing category in words.json: {cat}")
-        if len(WORDS_DB[cat]) < 50:
-            raise ValueError(f"Category '{cat}' has too few words.")
+
+        block = WORDS_DB[cat]
+
+        # ✅ New format: {"easy":[...], "medium":[...], "hard":[...]}
+        if isinstance(block, dict):
+            for d in required_diffs:
+                if d not in block:
+                    raise ValueError(f"Missing difficulty '{d}' in category '{cat}'.")
+                if not isinstance(block[d], list):
+                    raise ValueError(f"Category '{cat}' difficulty '{d}' must be a list.")
+                if len(block[d]) < 50:
+                    raise ValueError(
+                        f"Category '{cat}' difficulty '{d}' has too few words ({len(block[d])}/50)."
+                    )
+
+        # ✅ Old fallback format: ["word1","word2",...]
+        elif isinstance(block, list):
+            if len(block) < 50:
+                raise ValueError(f"Category '{cat}' has too few words ({len(block)}/50).")
+
+        else:
+            raise ValueError(
+                f"Invalid format for category '{cat}'. Expected list or dict with difficulties."
+            )
+
 
 
 def generate_room_code(length: int = 4) -> str:
@@ -94,20 +137,36 @@ def pick_two_categories() -> List[str]:
     return random.sample(ALL_CATEGORIES, 2)
 
 
-def pick_words(category: str, used_words: Dict[str, set], count: int = 5) -> List[str]:
-    words = WORDS_DB.get(category, [])
-    used = used_words.setdefault(category, set())
+def pick_words(category: str, difficulty: str, used_words: Dict[str, set], count: int = 5) -> List[str]:
+    d = (difficulty or "medium").lower()
+    if d not in ["easy", "medium", "hard"]:
+        d = "medium"
+
+    cat_block = WORDS_DB.get(category)
+
+    # New format: WORDS_DB[category] = {"easy":[...], "medium":[...], "hard":[...]}
+    if isinstance(cat_block, dict):
+        words = cat_block.get(d, [])
+    else:
+        # fallback old format (all difficulties share same list)
+        words = cat_block or []
+
+    key = f"{category}:{d}"
+    used = used_words.setdefault(key, set())
 
     remaining = [w for w in words if w not in used]
     if len(remaining) < count:
         used.clear()
         remaining = words[:]
 
+    if len(remaining) < count:
+        # not enough words in that difficulty
+        return random.sample(words, min(count, len(words)))
+
     picked = random.sample(remaining, count)
     for w in picked:
         used.add(w)
     return picked
-
 
 def ensure_room(room_id: str) -> Optional[Dict[str, Any]]:
     return ROOMS.get(room_id)
@@ -176,6 +235,7 @@ def room_public_state(room: Dict[str, Any]) -> Dict[str, Any]:
         "round": current.get("round"),          # rotation count (1,2,3...)
         "turn_number": current.get("turn_number"),
         "turn_started": current.get("turn_started", False),
+        "difficulty": current.get("difficulty"),
         "phase": room.get("phase", "lobby")
     }
 
@@ -258,6 +318,18 @@ def prepare_next_turn(room: Dict[str, Any]) -> None:
     if not room.get("teams"):
         return
 
+    # ✅ if teams are broken (disconnect/kick), end safely
+    if not teams_are_valid(room):
+        rid = room["room_id"]
+        room["phase"] = "results"
+        room["state"] = "results"
+        room["ranking"] = compute_ranking(room)
+        room["current_turn"] = {}
+        stop_timer(room)
+        socketio.emit("game_end", {"room": room_public_state(room)}, room=rid)
+        broadcast_room(rid)
+        return
+
     if room.get("turn_order") is None:
         ids = [t["team_id"] for t in room["teams"]]
         random.shuffle(ids)
@@ -275,7 +347,19 @@ def prepare_next_turn(room: Dict[str, Any]) -> None:
     if not team:
         return
 
-    p1, p2 = team["players"][0], team["players"][1]
+    ps = team.get("players", [])
+    if not isinstance(ps, list) or len(ps) < 2:
+        rid = room["room_id"]
+        room["phase"] = "results"
+        room["state"] = "results"
+        room["ranking"] = compute_ranking(room)
+        room["current_turn"] = {}
+        stop_timer(room)
+        socketio.emit("game_end", {"room": room_public_state(room)}, room=rid)
+        broadcast_room(rid)
+        return
+
+    p1, p2 = ps[0], ps[1]
     tp = int(team.get("turns_played", 0))
 
     if tp % 2 == 0:
@@ -289,12 +373,13 @@ def prepare_next_turn(room: Dict[str, Any]) -> None:
         "guesser_id": guesser_id,
         "category_options": pick_two_categories(),
         "chosen_category": None,
+        "difficulty": None,
         "words": None,
         "found_words": [],
         "remaining_time": None,
         "turn_started": False,
         "turn_points": 0,
-        "round": room["current_round"],      # rotation count
+        "round": room["current_round"],
         "turn_number": room["turn_number"],
     }
 
@@ -400,40 +485,59 @@ def on_connect():
 
 
 @socketio.on("disconnect")
-def on_disconnect():
+def on_disconnect(reason=None):
     player_id = request.sid
 
     for room_id, room in list(ROOMS.items()):
-        if player_id in room["players"]:
-            was_host = (room["host_id"] == player_id)
+        if player_id not in room.get("players", {}):
+            continue
 
-            room["players"].pop(player_id, None)
+        was_host = (room.get("host_id") == player_id)
 
-            # remove from saved teams
-            for t in room.get("teams", []):
-                if player_id in t["players"]:
-                    t["players"].remove(player_id)
+        room["players"].pop(player_id, None)
 
-            # remove from draft teams too
-            draft = room.get("draft_teams", [])
-            if isinstance(draft, list):
-                room["draft_teams"] = [[pid for pid in team if pid != player_id] for team in draft]
+        # remove from saved teams
+        for t in room.get("teams", []):
+            ps = t.get("players", [])
+            if isinstance(ps, list) and player_id in ps:
+                ps.remove(player_id)
 
-            # delete empty saved teams
-            room["teams"] = [t for t in room.get("teams", []) if len(t["players"]) > 0]
+        # remove from draft teams too
+        draft = room.get("draft_teams", [])
+        if isinstance(draft, list):
+            room["draft_teams"] = [[pid for pid in team if pid != player_id] for team in draft]
 
-            if len(room["players"]) == 0:
-                ROOMS.pop(room_id, None)
-                continue
+        # delete empty saved teams (but keep partially-filled teams; we handle validity below)
+        room["teams"] = [t for t in room.get("teams", []) if len(t.get("players", [])) > 0]
 
-            if was_host:
-                room["host_id"] = next(iter(room["players"].keys()))
+        # room empty -> delete
+        if len(room.get("players", {})) == 0:
+            ROOMS.pop(room_id, None)
+            continue
 
-            ct = room.get("current_turn") or {}
-            if room.get("phase") == "playing" and player_id in [ct.get("describer_id"), ct.get("guesser_id")]:
-                end_team_turn(room_id, reason="player_left")
+        # host migration
+        if was_host:
+            room["host_id"] = next(iter(room["players"].keys()))
 
+        # ✅ if game is running and teams are now invalid -> end game safely
+        if room.get("phase") in ["playing", "ranking"] and not teams_are_valid(room):
+            room["phase"] = "results"
+            room["state"] = "results"
+            room["ranking"] = compute_ranking(room)
+            room["current_turn"] = {}
+            stop_timer(room)
+            socketio.emit("game_end", {"room": room_public_state(room)}, room=room_id)
             broadcast_room(room_id)
+            continue
+
+        # if player left during active turn (and teams still valid) -> end turn
+        ct = room.get("current_turn") or {}
+        if room.get("phase") == "playing" and player_id in [ct.get("describer_id"), ct.get("guesser_id")]:
+            end_team_turn(room_id, reason="player_left")
+            continue
+
+        broadcast_room(room_id)
+
 
 @socketio.on("host_play_again")
 def host_play_again(data):
@@ -460,7 +564,7 @@ def host_play_again(data):
     # keep existing draft teams (or keep them as-is)
     room["draft_teams"] = [t["players"] for t in room.get("teams", [])] if room.get("teams") else room.get("draft_teams", [])
 
-    room["used_words"] = {cat: set() for cat in ALL_CATEGORIES}
+    room["used_words"] = {}
     room["turn_order"] = None
     room["turn_index"] = 0
     room["current_round"] = 1
@@ -493,7 +597,7 @@ def create_room(data):
         "teams": [],
         "draft_teams": [],  # live teams in lobby
 
-        "used_words": {cat: set() for cat in ALL_CATEGORIES},
+        "used_words": {},
         "timer_task": None,
 
         "turn_order": None,
@@ -708,7 +812,7 @@ def host_start_game(data):
     room["state"] = "playing"
     room["phase"] = "ranking"  # ✅ show ranking first
 
-    room["used_words"] = {cat: set() for cat in ALL_CATEGORIES}
+    room["used_words"] = {}
     room["turn_order"] = None
     room["turn_index"] = 0
     room["current_round"] = 1
@@ -774,9 +878,9 @@ def choose_category(data):
         return
 
     ct["chosen_category"] = category
-    words = pick_words(category, room["used_words"], count=5)
-    ct["words"] = words
-    ct["word_status"] = {w: "unfound" for w in words}   # unfound | close | exact
+    ct["difficulty"] = None
+    ct["words"] = None
+    ct["word_status"] = {}   # unfound | close | exact
     ct["word_claims"] = {}  # word -> box index
     ct["found_words"] = []
     ct["guess_boxes"] = ["", "", "", "", ""]
@@ -785,7 +889,51 @@ def choose_category(data):
     # ✅ important: do NOT start the timer yet
     ct["remaining_time"] = None
 
-    socketio.emit("category_chosen", {"category": category, "words": words}, room=room_id)
+    socketio.emit("category_chosen", {"category": category}, room=room_id)
+    broadcast_room(room_id)
+
+@socketio.on("choose_difficulty")
+def choose_difficulty(data):
+    room_id = str((data or {}).get("room_id", "")).strip().upper()
+    difficulty = str((data or {}).get("difficulty", "")).strip().lower()
+
+    room = ensure_room(room_id)
+    if not room or room.get("phase") != "playing":
+        return
+
+    ct = room.get("current_turn") or {}
+    if request.sid != ct.get("describer_id"):
+        emit("error", {"message": "Only the describer can choose the difficulty."})
+        return
+
+    if not ct.get("turn_started"):
+        emit("error", {"message": "Describer must press Start Turn first."})
+        return
+
+    # ✅ ONLY require category
+    if not ct.get("chosen_category"):
+        emit("error", {"message": "Choose a category first."})
+        return
+
+    if difficulty not in ["easy", "medium", "hard"]:
+        emit("error", {"message": "Invalid difficulty."})
+        return
+
+    ct["difficulty"] = difficulty
+
+    # ✅ NOW we pick words based on (category + difficulty)
+    words = pick_words(ct["chosen_category"], difficulty, room["used_words"], count=5)
+    ct["words"] = words
+    ct["word_status"] = {w: "unfound" for w in words}
+    ct["word_claims"] = {}
+    ct["found_words"] = []
+    ct["guess_boxes"] = ["", "", "", "", ""]
+    ct["turn_points"] = 0
+
+    # still countdown phase
+    ct["remaining_time"] = None
+
+    socketio.emit("difficulty_chosen", {"difficulty": difficulty, "words": words}, room=room_id)
     broadcast_room(room_id)
 
     # ✅ start real round AFTER 3 seconds
@@ -813,7 +961,8 @@ def guess_boxes_typing(data):
 
     if "guess_boxes" not in ct or not isinstance(ct["guess_boxes"], list):
         ct["guess_boxes"] = ["", "", "", "", ""]
-
+    if not ct.get("difficulty"):
+        return
     ct["guess_boxes"][index] = text
     socketio.emit("guess_boxes_update", {"boxes": ct["guess_boxes"]}, room=room_id)
 
@@ -905,6 +1054,9 @@ def submit_guess_box(data):
             # close stays close (editable), no extra points
             # exact cannot happen here since exact words excluded from candidates
 
+    mult = points_multiplier(ct.get("difficulty"))
+    points_delta = points_delta * mult
+
     # ✅ broadcast box status to everyone
     socketio.emit("guess_box_result", {"index": index, "status": status}, room=room_id)
 
@@ -913,8 +1065,8 @@ def submit_guess_box(data):
         team_id = ct.get("team_id")
         team = next((t for t in room["teams"] if t["team_id"] == team_id), None)
         if team:
-            team["score"] += points_delta
-        ct["turn_points"] = int(ct.get("turn_points", 0)) + points_delta
+            team["score"] = float(team.get("score", 0)) + float(points_delta)
+        ct["turn_points"] = float(ct.get("turn_points", 0)) + float(points_delta)
         socketio.emit("score_update", {"teams": room.get("teams", [])}, room=room_id)
         broadcast_room(room_id)
 
@@ -923,6 +1075,9 @@ def submit_guess_box(data):
     exact_count = sum(1 for w in ct["words"] if ct["word_status"].get(w) == "exact")
     if exact_count >= 5:
         end_team_turn(room_id, reason="all_found")
+    if not ct.get("difficulty"):
+        return
+
 
 @socketio.on("host_kick_player")
 def host_kick_player(data):
@@ -971,7 +1126,17 @@ def host_kick_player(data):
     if len(room["players"]) == 0:
         ROOMS.pop(room_id, None)
         return
-
+# ✅ if game is running and teams are now invalid -> end game safely
+    if room.get("phase") in ["playing", "ranking"] and not teams_are_valid(room):
+        room["phase"] = "results"
+        room["state"] = "results"
+        room["ranking"] = compute_ranking(room)
+        room["current_turn"] = {}
+        stop_timer(room)
+        socketio.emit("game_end", {"room": room_public_state(room)}, room=room_id)
+        broadcast_room(room_id)
+        return
+    
     broadcast_room(room_id)
 
 
