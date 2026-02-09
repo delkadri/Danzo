@@ -5,7 +5,7 @@ import re
 import unicodedata
 from typing import Dict, Any, List, Optional
 
-from flask import Flask, request
+from flask import Flask, request, jsonify
 from flask_socketio import SocketIO, emit, join_room, leave_room
 from dotenv import load_dotenv
 
@@ -14,12 +14,28 @@ load_dotenv()
 app = Flask(__name__)
 app.config["SECRET_KEY"] = os.getenv("SECRET_KEY", "dev_secret_key")
 CORS_ORIGIN = os.getenv("CORS_ORIGIN", "*")
+REST_ADMIN_TOKEN = os.getenv("REST_ADMIN_TOKEN", "")
+
 
 socketio = SocketIO(
     app,
     cors_allowed_origins=CORS_ORIGIN,
     async_mode="eventlet"
 )
+
+@app.after_request
+def add_cors_headers(resp):
+    # REST CORS (Socket.IO a déjà cors_allowed_origins)
+    resp.headers["Access-Control-Allow-Origin"] = CORS_ORIGIN
+    resp.headers["Access-Control-Allow-Methods"] = "GET,POST,OPTIONS"
+    resp.headers["Access-Control-Allow-Headers"] = "Content-Type,Authorization"
+    return resp
+
+
+@app.route("/api/<path:_any>", methods=["OPTIONS"])
+def api_preflight(_any):
+    return ("", 204)
+
 
 ALL_CATEGORIES = ["sport", "song", "movies", "geography", "history", "brand"]
 WORDS_PATH = os.path.join(os.path.dirname(__file__), "data", "words.json")
@@ -35,6 +51,94 @@ ROOMS: Dict[str, Dict[str, Any]] = {}
 # -----------------------------
 # Helpers
 # -----------------------------
+def normalize_room_id(room_id: str) -> str:
+    rid = str(room_id or "").strip().upper()
+    # ton jeu est en 4 digits : "0123"
+    if not re.fullmatch(r"\d{4}", rid):
+        return ""
+    return rid
+
+
+def require_admin_rest() -> Optional[Any]:
+    """
+    Retourne une réponse Flask (jsonify, code) si non autorisé, sinon None.
+    Header attendu:
+      Authorization: Bearer <REST_ADMIN_TOKEN>
+    """
+    if not REST_ADMIN_TOKEN:
+        return jsonify({"error": "REST admin token not configured"}), 500
+
+    auth = request.headers.get("Authorization", "")
+    expected = f"Bearer {REST_ADMIN_TOKEN}"
+    if auth != expected:
+        return jsonify({"error": "Unauthorized"}), 401
+    return None
+
+
+def remove_player_from_room(room_id: str, player_id: str, reason: str = "removed") -> bool:
+    """
+    Utilisable par REST et Socket events.
+    - nettoie players/teams/draft_teams
+    - gère host migration
+    - si game en cours et teams invalides -> results
+    - broadcast_room + notifs
+    """
+    room = ensure_room(room_id)
+    if not room:
+        return False
+
+    player_id = str(player_id or "").strip()
+    if not player_id or player_id not in room.get("players", {}):
+        return False
+
+    was_host = (room.get("host_id") == player_id)
+
+    # remove player
+    room["players"].pop(player_id, None)
+
+    # remove from saved teams
+    for t in room.get("teams", []):
+        ps = t.get("players", [])
+        if isinstance(ps, list) and player_id in ps:
+            ps.remove(player_id)
+
+    # remove from draft teams
+    draft = room.get("draft_teams", [])
+    if isinstance(draft, list):
+        room["draft_teams"] = [[pid for pid in team if pid != player_id] for team in draft]
+
+    # remove empty saved teams
+    room["teams"] = [t for t in room.get("teams", []) if len(t.get("players", [])) > 0]
+
+    # if no players -> delete room
+    if len(room.get("players", {})) == 0:
+        ROOMS.pop(room_id, None)
+        return True
+
+    # host migration
+    if was_host:
+        room["host_id"] = next(iter(room["players"].keys()))
+
+    # if game running and teams invalid -> end game safely
+    if room.get("phase") in ["playing", "ranking"] and not teams_are_valid(room):
+        room["phase"] = "results"
+        room["state"] = "results"
+        room["ranking"] = compute_ranking(room)
+        room["current_turn"] = {}
+        stop_timer(room)
+        socketio.emit("game_end", {"room": room_public_state(room)}, room=room_id)
+        broadcast_room(room_id)
+        return True
+
+    # if player left during active turn -> end turn
+    ct = room.get("current_turn") or {}
+    if room.get("phase") == "playing" and player_id in [ct.get("describer_id"), ct.get("guesser_id")]:
+        end_team_turn(room_id, reason="player_left")
+        return True
+
+    broadcast_room(room_id)
+    return True
+
 def teams_are_valid(room: Dict[str, Any]) -> bool:
     teams = room.get("teams", [])
     if not isinstance(teams, list) or not teams:
@@ -475,6 +579,409 @@ def start_round_after_countdown(room_id: str, delay: int = 3) -> None:
         start_timer(room_id)
 
     socketio.start_background_task(_run)
+# -----------------------------
+# REST API
+# -----------------------------
+@app.get("/api/health")
+def api_health():
+    return jsonify({"ok": True})
+
+
+@app.get("/api/meta")
+def api_meta():
+    return jsonify({
+        "categories": ALL_CATEGORIES,
+        "difficulties": ["easy", "medium", "hard"],
+        "settings": DEFAULT_SETTINGS,
+        "target_score": TARGET_SCORE,
+    })
+
+
+@app.get("/api/rooms/<room_id>")
+def api_room_state(room_id):
+    rid = normalize_room_id(room_id)
+    if not rid:
+        return jsonify({"error": "Invalid room_id"}), 400
+
+    room = ensure_room(rid)
+    if not room:
+        return jsonify({"error": "Room not found"}), 404
+
+    return jsonify({"room": room_public_state(room)})
+
+
+@app.get("/api/words/<category>")
+def api_words(category):
+    cat = str(category or "").strip().lower()
+    if cat not in ALL_CATEGORIES:
+        return jsonify({"error": "Invalid category"}), 400
+
+    difficulty = str(request.args.get("difficulty", "medium")).strip().lower()
+    if difficulty not in ["easy", "medium", "hard"]:
+        difficulty = "medium"
+
+    try:
+        count = int(request.args.get("count", "50"))
+    except Exception:
+        count = 50
+    count = max(1, min(200, count))
+
+    block = WORDS_DB.get(cat)
+    if isinstance(block, dict):
+        words = block.get(difficulty, [])
+    else:
+        words = block or []
+
+    # renvoie une sélection random stable côté API
+    if len(words) <= count:
+        out = list(words)
+        random.shuffle(out)
+        out = out[:count]
+    else:
+        out = random.sample(words, count)
+
+    return jsonify({"category": cat, "difficulty": difficulty, "count": len(out), "words": out})
+
+
+@app.post("/api/rooms/<room_id>/kick")
+def api_kick(room_id):
+    # ✅ sécurisé
+    auth_err = require_admin_rest()
+    if auth_err:
+        return auth_err
+
+    rid = normalize_room_id(room_id)
+    if not rid:
+        return jsonify({"error": "Invalid room_id"}), 400
+
+    data = request.get_json(silent=True) or {}
+    player_id = str(data.get("player_id", "")).strip()
+    if not player_id:
+        return jsonify({"error": "player_id is required"}), 400
+
+    room = ensure_room(rid)
+    if not room:
+        return jsonify({"error": "Room not found"}), 404
+
+    # ne pas kicker l'host via REST non plus
+    if player_id == room.get("host_id"):
+        return jsonify({"error": "Cannot kick host"}), 400
+
+    ok = remove_player_from_room(rid, player_id, reason="kicked")
+
+    # notify + disconnect socket si possible
+    try:
+        socketio.emit("kicked", {"room_id": rid, "message": "Removed by admin (REST)."}, room=player_id)
+        socketio.server.disconnect(player_id)
+    except Exception:
+        pass
+
+    return jsonify({"ok": ok})
+
+
+@app.post("/api/rooms/<room_id>/play_again")
+def api_play_again(room_id):
+    auth_err = require_admin_rest()
+    if auth_err:
+        return auth_err
+
+    rid = normalize_room_id(room_id)
+    if not rid:
+        return jsonify({"error": "Invalid room_id"}), 400
+
+    room = ensure_room(rid)
+    if not room:
+        return jsonify({"error": "Room not found"}), 404
+
+    # même logique que host_play_again (mais REST)
+    stop_timer(room)
+
+    room["state"] = "lobby"
+    room["phase"] = "lobby"
+
+    for t in room.get("teams", []):
+        t["score"] = 0
+        t["turns_played"] = 0
+
+    # tu voulais revenir au lobby "vide" -> on remet tout le monde unassigned
+    room["teams"] = []
+    room["draft_teams"] = []
+
+    room["used_words"] = {}
+    room["turn_order"] = None
+    room["turn_index"] = 0
+    room["current_round"] = 1
+    room["turn_number"] = 1
+    room["current_turn"] = {}
+    room["ranking"] = []
+    room["last_turn_summary"] = None
+
+    broadcast_room(rid)
+    socketio.emit("back_to_lobby", {"room": room_public_state(room)}, room=rid)
+
+    return jsonify({"ok": True, "room": room_public_state(room)})
+
+# -----------------------------
+# Swagger / OpenAPI
+# -----------------------------
+def build_openapi_spec():
+    return {
+        "openapi": "3.0.3",
+        "info": {
+            "title": "Danzo / Ziago REST API",
+            "version": "1.0.0",
+            "description": "REST API for Danzo/Ziago (in addition to Socket.IO real-time API).",
+        },
+        "servers": [
+            {"url": "/"}
+        ],
+        "tags": [
+            {"name": "system"},
+            {"name": "rooms"},
+            {"name": "words"},
+        ],
+        "components": {
+            "securitySchemes": {
+                "bearerAuth": {
+                    "type": "http",
+                    "scheme": "bearer",
+                    "bearerFormat": "TOKEN"
+                }
+            },
+            "schemas": {
+                "Error": {
+                    "type": "object",
+                    "properties": {"error": {"type": "string"}},
+                },
+                "Health": {
+                    "type": "object",
+                    "properties": {"ok": {"type": "boolean"}},
+                    "required": ["ok"],
+                },
+                "Meta": {
+                    "type": "object",
+                    "properties": {
+                        "categories": {"type": "array", "items": {"type": "string"}},
+                        "difficulties": {"type": "array", "items": {"type": "string"}},
+                        "settings": {"type": "object"},
+                        "target_score": {"type": "integer"},
+                    }
+                },
+                "RoomStateResponse": {
+                    "type": "object",
+                    "properties": {"room": {"type": "object"}},
+                },
+                "WordsResponse": {
+                    "type": "object",
+                    "properties": {
+                        "category": {"type": "string"},
+                        "difficulty": {"type": "string"},
+                        "count": {"type": "integer"},
+                        "words": {"type": "array", "items": {"type": "string"}}
+                    }
+                },
+                "KickRequest": {
+                    "type": "object",
+                    "properties": {
+                        "player_id": {"type": "string"}
+                    },
+                    "required": ["player_id"]
+                }
+            }
+        },
+        "paths": {
+            "/api/health": {
+                "get": {
+                    "tags": ["system"],
+                    "summary": "Healthcheck",
+                    "responses": {
+                        "200": {
+                            "description": "OK",
+                            "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Health"}}}
+                        }
+                    }
+                }
+            },
+            "/api/meta": {
+                "get": {
+                    "tags": ["system"],
+                    "summary": "API meta: categories, difficulties, settings",
+                    "responses": {
+                        "200": {
+                            "description": "OK",
+                            "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Meta"}}}
+                        }
+                    }
+                }
+            },
+            "/api/rooms/{room_id}": {
+                "get": {
+                    "tags": ["rooms"],
+                    "summary": "Get public room state",
+                    "parameters": [
+                        {
+                            "name": "room_id",
+                            "in": "path",
+                            "required": True,
+                            "schema": {"type": "string", "example": "1234"}
+                        }
+                    ],
+                    "responses": {
+                        "200": {
+                            "description": "Room state",
+                            "content": {"application/json": {"schema": {"$ref": "#/components/schemas/RoomStateResponse"}}}
+                        },
+                        "400": {
+                            "description": "Invalid room_id",
+                            "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Error"}}}
+                        },
+                        "404": {
+                            "description": "Room not found",
+                            "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Error"}}}
+                        }
+                    }
+                }
+            },
+            "/api/words/{category}": {
+                "get": {
+                    "tags": ["words"],
+                    "summary": "Get words for a category/difficulty",
+                    "parameters": [
+                        {
+                            "name": "category",
+                            "in": "path",
+                            "required": True,
+                            "schema": {"type": "string", "example": "sport"}
+                        },
+                        {
+                            "name": "difficulty",
+                            "in": "query",
+                            "required": False,
+                            "schema": {"type": "string", "enum": ["easy", "medium", "hard"], "default": "medium"}
+                        },
+                        {
+                            "name": "count",
+                            "in": "query",
+                            "required": False,
+                            "schema": {"type": "integer", "default": 50, "minimum": 1, "maximum": 200}
+                        }
+                    ],
+                    "responses": {
+                        "200": {
+                            "description": "Words list",
+                            "content": {"application/json": {"schema": {"$ref": "#/components/schemas/WordsResponse"}}}
+                        },
+                        "400": {
+                            "description": "Invalid category",
+                            "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Error"}}}
+                        }
+                    }
+                }
+            },
+            "/api/rooms/{room_id}/kick": {
+                "post": {
+                    "tags": ["rooms"],
+                    "summary": "Kick a player (admin token required)",
+                    "security": [{"bearerAuth": []}],
+                    "parameters": [
+                        {
+                            "name": "room_id",
+                            "in": "path",
+                            "required": True,
+                            "schema": {"type": "string", "example": "1234"}
+                        }
+                    ],
+                    "requestBody": {
+                        "required": True,
+                        "content": {"application/json": {"schema": {"$ref": "#/components/schemas/KickRequest"}}}
+                    },
+                    "responses": {
+                        "200": {"description": "OK"},
+                        "401": {
+                            "description": "Unauthorized",
+                            "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Error"}}}
+                        },
+                        "400": {
+                            "description": "Bad request",
+                            "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Error"}}}
+                        },
+                        "404": {
+                            "description": "Room not found",
+                            "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Error"}}}
+                        }
+                    }
+                }
+            },
+            "/api/rooms/{room_id}/play_again": {
+                "post": {
+                    "tags": ["rooms"],
+                    "summary": "Reset game back to lobby (admin token required)",
+                    "security": [{"bearerAuth": []}],
+                    "parameters": [
+                        {
+                            "name": "room_id",
+                            "in": "path",
+                            "required": True,
+                            "schema": {"type": "string", "example": "1234"}
+                        }
+                    ],
+                    "responses": {
+                        "200": {"description": "OK"},
+                        "401": {
+                            "description": "Unauthorized",
+                            "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Error"}}}
+                        },
+                        "400": {
+                            "description": "Bad request",
+                            "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Error"}}}
+                        },
+                        "404": {
+                            "description": "Room not found",
+                            "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Error"}}}
+                        }
+                    }
+                }
+            },
+        }
+    }
+
+
+@app.get("/api/openapi.json")
+def api_openapi_json():
+    return jsonify(build_openapi_spec())
+
+
+@app.get("/api/docs")
+def api_docs():
+    # Swagger UI via CDN (no dependency)
+    html = f"""
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8"/>
+    <title>Danzo API Docs</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1"/>
+    <link rel="stylesheet" href="https://unpkg.com/swagger-ui-dist@5/swagger-ui.css" />
+    <style>
+      body {{ margin:0; background:#0b0b0f; }}
+      .topbar {{ display:none; }}
+    </style>
+  </head>
+  <body>
+    <div id="swagger-ui"></div>
+    <script src="https://unpkg.com/swagger-ui-dist@5/swagger-ui-bundle.js"></script>
+    <script>
+      window.ui = SwaggerUIBundle({{
+        url: "/api/openapi.json",
+        dom_id: "#swagger-ui",
+        deepLinking: true,
+        persistAuthorization: true
+      }});
+    </script>
+  </body>
+</html>
+"""
+    return html, 200, {"Content-Type": "text/html"}
 
 # -----------------------------
 # Socket events
