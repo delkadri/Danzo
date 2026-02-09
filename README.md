@@ -28,22 +28,26 @@ pip install -r requirements.txt
 python app.py
 
 ### docker
+
+Build
+docker compose build
+
 Stop
 docker compose down
 
 Restart
 docker compose up
 
-### idée pas importante :
+### Bonus :
 - reduire la taille du bouton Leave
 - logo in the ranking very ugly
 - mettre mes cordonnées quelque part (credits)
 - changer les couleurs de UI (plus clair?)
 - enlever des detailles
-- la case des mots change de couleur lorsque c'est validé
 - animations / micro-interactions mobile (haptics / vibration / sound)
-- Reconnect smart
-- sound for the timer (last 5 sec + boom)
 - logs
 
 ### changement : 
+
+- data base not local
+- Reconnect smart
