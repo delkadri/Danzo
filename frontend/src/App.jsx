@@ -17,29 +17,83 @@ export default function App() {
   // ✅ small modern banner message (ex: kicked)
   const [systemMsg, setSystemMsg] = useState("");
 
+  const clearSessionStorage = () => {
+    localStorage.removeItem("danzo_room_id");
+    localStorage.removeItem("danzo_player_id");
+    localStorage.removeItem("danzo_name");
+  };
+
+  const resetToHome = (msg = "") => {
+    if (msg) setSystemMsg(msg);
+    setMyId(null);
+    setRoomId(null);
+    setRoom(null);
+    setView("home");
+    clearSessionStorage();
+  };
+
   const leaveRoom = () => {
     const rid = roomId;
-    if (rid) socket.emit("leave_room", { room_id: rid });
+    // on clear d’abord, comme ça si refresh => pas de rejoin auto
+    clearSessionStorage();
+
+    if (rid) {
+      socket.emit("leave_room", { room_id: rid });
+    }
+
+    setMyId(null);
     setRoomId(null);
     setRoom(null);
     setView("home");
   };
 
   useEffect(() => {
-    const onConnected = (payload) => setMyId(payload?.id || null);
+    const onConnected = () => {
+      // ✅ auto-reconnect on refresh (si session présente)
+      const rid = localStorage.getItem("danzo_room_id");
+      const pid = localStorage.getItem("danzo_player_id");
+      const name = localStorage.getItem("danzo_name");
+
+      // si déjà dans une room côté state, ne rien faire
+      if (roomId || myId) return;
+
+      if (rid && pid && name) {
+        socket.emit("join_room", { room_id: rid, name, player_id: pid });
+      }
+    };
 
     const onRoomJoined = (payload) => {
       const rid = payload?.room_id;
-      if (!rid) return;
+      const pid = payload?.player_id;
+      if (!rid || !pid) return;
+
       setRoomId(rid);
+      setMyId(pid);
       setView("lobby");
       setRoom((prev) => prev || { room_id: rid });
-      setSystemMsg(""); // clear banner if any
+      setSystemMsg("");
+
+      // persist for refresh-reconnect
+      localStorage.setItem("danzo_room_id", rid);
+      localStorage.setItem("danzo_player_id", pid);
+      // le nom est normalement déjà stocké par Home
     };
 
     const onRoomState = (payload) => {
       const newRoom = payload?.room;
       if (!newRoom) return;
+
+      // ✅ Si on a un player_id et qu'il n'est plus dans la room => on sort
+      // (utile si "kicked" n'arrive pas pour une raison quelconque)
+      if (myId) {
+        const ids = Array.isArray(newRoom.players)
+          ? newRoom.players.map((p) => p?.id).filter(Boolean)
+          : [];
+        if (ids.length > 0 && !ids.includes(myId)) {
+          resetToHome("You were removed from the room.");
+          return;
+        }
+      }
 
       setRoom(newRoom);
 
@@ -67,13 +121,8 @@ export default function App() {
 
     // ✅ when admin kicks you
     const onKicked = (payload) => {
-      // payload can include message/room_id if you want (optional)
-      setSystemMsg(payload?.message || "An admin removed you from the room.");
-
-      // reset local state to return to home
-      setRoomId(null);
-      setRoom(null);
-      setView("home");
+      // IMPORTANT: clear storage to prevent auto-rejoin on refresh
+      resetToHome(payload?.message || "An admin removed you from the room.");
     };
 
     socket.on("connected", onConnected);
@@ -93,7 +142,7 @@ export default function App() {
       socket.off("error", onError);
       socket.off("kicked", onKicked);
     };
-  }, []);
+  }, [roomId, myId]); // ✅ important: needed for onConnected + onRoomState checks
 
   // loading safe
   if (view !== "home" && (!roomId || !room)) {
@@ -120,7 +169,9 @@ export default function App() {
       <div className="mb-5 flex items-center justify-between">
         <div>
           <div className="text-2xl font-black">Play Danzo</div>
-          <div className="text-sm text-zinc-400">{roomId ? `Room: ${roomId}` : ""}</div>
+          <div className="text-sm text-zinc-400">
+            {roomId ? `Room: ${roomId}` : ""}
+          </div>
         </div>
       </div>
 

@@ -28,7 +28,9 @@ docker compose up
 - animations / micro-interactions mobile (haptics / vibration / sound)
 - logs
 
-### changement : 
+### Obligatoire : 
 
-- data base not local
-- Reconnect smart
+- pagination
+- vrai base de donnée
+- API REST
+- Deploiment
