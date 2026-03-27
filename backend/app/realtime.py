@@ -1,62 +1,27 @@
-import os
-import json
 import random
 import re
 import unicodedata
 import uuid
 from typing import Dict, Any, List, Optional, Tuple
 
-from flask import Flask, request, jsonify
-from flask_socketio import SocketIO, emit, join_room, leave_room
-from dotenv import load_dotenv
+from flask import jsonify, request
+from flask_socketio import emit, join_room, leave_room
 
-load_dotenv()
-
-# -----------------------------
-# App / Config
-# -----------------------------
-app = Flask(__name__)
-app.config["SECRET_KEY"] = os.getenv("SECRET_KEY", "dev_secret_key")
-
-CORS_ORIGIN = os.getenv("CORS_ORIGIN", "*")
-REST_ADMIN_TOKEN = os.getenv("REST_ADMIN_TOKEN", "")
-
-RECONNECT_GRACE_SECONDS = int(os.getenv("RECONNECT_GRACE_SECONDS", "45"))
-
-socketio = SocketIO(
-    app,
-    cors_allowed_origins=CORS_ORIGIN,
-    async_mode="eventlet"
-)
-
-@app.after_request
-def add_cors_headers(resp):
-    resp.headers["Access-Control-Allow-Origin"] = CORS_ORIGIN
-    resp.headers["Access-Control-Allow-Methods"] = "GET,POST,OPTIONS"
-    resp.headers["Access-Control-Allow-Headers"] = "Content-Type,Authorization"
-    return resp
-
-@app.route("/api/<path:_any>", methods=["OPTIONS"])
-def api_preflight(_any):
-    return ("", 204)
+from .auth import require_admin_rest
+from .constants import ALL_CATEGORIES, DEFAULT_SETTINGS, DIFFICULTIES, TARGET_SCORE
+from .core import app
+from .extensions import socketio
+from .services import catalog_service
 
 
 # -----------------------------
 # Game constants
 # -----------------------------
-ALL_CATEGORIES = ["sport", "song", "movies", "geography", "history", "brand"]
-WORDS_PATH = os.path.join(os.path.dirname(__file__), "data", "words.json")
-
-DEFAULT_SETTINGS = {"time_limit": 40}
-TARGET_SCORE = 50
+RECONNECT_GRACE_SECONDS = int(app.config["RECONNECT_GRACE_SECONDS"])
 
 # -----------------------------
 # In-memory storage
 # -----------------------------
-# WORDS_DB format:
-#   WORDS_DB[cat] = {"easy":[...], "medium":[...], "hard":[...]}  OR fallback list
-WORDS_DB: Dict[str, Any] = {}
-
 # ROOMS[room_id] = room dict
 ROOMS: Dict[str, Dict[str, Any]] = {}
 
@@ -84,15 +49,6 @@ def normalize_room_id(room_id: str) -> str:
     if not re.fullmatch(r"\d{4}", rid):
         return ""
     return rid
-
-def require_admin_rest() -> Optional[Tuple[Any, int]]:
-    if not REST_ADMIN_TOKEN:
-        return jsonify({"error": "REST admin token not configured"}), 500
-    auth = request.headers.get("Authorization", "")
-    expected = f"Bearer {REST_ADMIN_TOKEN}"
-    if auth != expected:
-        return jsonify({"error": "Unauthorized"}), 401
-    return None
 
 def bind_session(room_id: str, player_id: str, sid: str) -> None:
     SESSIONS[sid] = {"room_id": room_id, "player_id": player_id}
@@ -133,69 +89,35 @@ def points_multiplier(difficulty: str) -> float:
         return 2.0
     return 1.0
 
-def load_words() -> None:
-    global WORDS_DB
-    with open(WORDS_PATH, "r", encoding="utf-8") as f:
-        WORDS_DB = json.load(f)
-
-    required_diffs = ["easy", "medium", "hard"]
-
-    for cat in ALL_CATEGORIES:
-        if cat not in WORDS_DB:
-            raise ValueError(f"Missing category in words.json: {cat}")
-
-        block = WORDS_DB[cat]
-
-        if isinstance(block, dict):
-            for d in required_diffs:
-                if d not in block:
-                    raise ValueError(f"Missing difficulty '{d}' in category '{cat}'.")
-                if not isinstance(block[d], list):
-                    raise ValueError(f"Category '{cat}' difficulty '{d}' must be a list.")
-                if len(block[d]) < 50:
-                    raise ValueError(
-                        f"Category '{cat}' difficulty '{d}' has too few words ({len(block[d])}/50)."
-                    )
-
-        elif isinstance(block, list):
-            if len(block) < 50:
-                raise ValueError(f"Category '{cat}' has too few words ({len(block)}/50).")
-
-        else:
-            raise ValueError(
-                f"Invalid format for category '{cat}'. Expected list or dict with difficulties."
-            )
-
 def pick_two_categories() -> List[str]:
     return random.sample(ALL_CATEGORIES, 2)
 
 def pick_words(category: str, difficulty: str, used_words: Dict[str, set], count: int = 5) -> List[str]:
     d = (difficulty or "medium").lower()
-    if d not in ["easy", "medium", "hard"]:
+    if d not in DIFFICULTIES:
         d = "medium"
-
-    cat_block = WORDS_DB.get(category)
-
-    if isinstance(cat_block, dict):
-        words = cat_block.get(d, [])
-    else:
-        words = cat_block or []
 
     key = f"{category}:{d}"
     used = used_words.setdefault(key, set())
 
-    remaining = [w for w in words if w not in used]
-    if len(remaining) < count:
+    words = catalog_service.get_words(
+        category=category,
+        difficulty=d,
+        count=count,
+        exclude_words=list(used),
+    )
+
+    if len(words) < count:
         used.clear()
-        remaining = words[:]
+        words = catalog_service.get_words(
+            category=category,
+            difficulty=d,
+            count=count,
+        )
 
-    if len(remaining) < count:
-        return random.sample(words, min(count, len(words)))
-
-    picked = random.sample(remaining, count)
-    for w in picked:
+    for w in words:
         used.add(w)
-    return picked
+    return words
 
 
 # -----------------------------
@@ -570,13 +492,12 @@ def remove_player_from_room(room_id: str, player_id: str, reason: str = "removed
 # -----------------------------
 @app.get("/api/health")
 def api_health():
-    return jsonify({"ok": True})
+    return jsonify(catalog_service.healthcheck())
 
 @app.get("/api/meta")
 def api_meta():
     return jsonify({
-        "categories": ALL_CATEGORIES,
-        "difficulties": ["easy", "medium", "hard"],
+        **catalog_service.get_public_meta(),
         "settings": DEFAULT_SETTINGS,
         "target_score": TARGET_SCORE,
     })
@@ -600,7 +521,7 @@ def api_words(category):
         return jsonify({"error": "Invalid category"}), 400
 
     difficulty = str(request.args.get("difficulty", "medium")).strip().lower()
-    if difficulty not in ["easy", "medium", "hard"]:
+    if difficulty not in DIFFICULTIES:
         difficulty = "medium"
 
     try:
@@ -609,18 +530,7 @@ def api_words(category):
         count = 50
     count = max(1, min(200, count))
 
-    block = WORDS_DB.get(cat)
-    if isinstance(block, dict):
-        words = block.get(difficulty, [])
-    else:
-        words = block or []
-
-    if len(words) <= count:
-        out = list(words)
-        random.shuffle(out)
-        out = out[:count]
-    else:
-        out = random.sample(words, count)
+    out = catalog_service.get_words(cat, difficulty, count)
 
     return jsonify({"category": cat, "difficulty": difficulty, "count": len(out), "words": out})
 
@@ -645,8 +555,6 @@ def api_kick(room_id):
 
     if player_id == room.get("host_id"):
         return jsonify({"error": "Cannot kick host"}), 400
-
-    ok = remove_player_from_room(rid, player_id, reason="kicked")
 
     # notify + disconnect socket if possible
     target_sid = get_player_sid(room, player_id)
@@ -1455,22 +1363,20 @@ def host_kick_player(data):
     room = ensure_room(room_id)
     if not room:
         return
-    if not is_host(room, get_session_player(room_id, request.sid) or room.get("host_id")):
-        # si tu utilises player_id stable : is_host doit comparer à player_id, pas sid
-        # (si ta fonction is_host est déjà correcte, enlève cette ligne)
-        pass
 
-    # ✅ sécurité : pas kicker l'host
+    actor_player_id = get_session_player(room_id, request.sid)
+    if not actor_player_id or not is_host(room, actor_player_id):
+        emit("error", {"message": "Only host can kick players."})
+        return
+
     if target_player_id == room.get("host_id"):
         return
 
     if target_player_id not in room.get("players", {}):
         return
 
-    # ✅ récupérer le VRAI socket sid du joueur
     target_sid = get_player_sid(room, target_player_id)
 
-    # ✅ informer le joueur AVANT de le remove (sinon on perd le sid)
     if target_sid:
         socketio.emit(
             "kicked",
@@ -1478,25 +1384,20 @@ def host_kick_player(data):
             to=target_sid
         )
 
-        # ✅ le sortir de la room socket.io
         try:
             leave_room(room_id, sid=target_sid)
         except Exception:
             pass
 
-        # ✅ le déconnecter pour stopper tout
         try:
             socketio.server.disconnect(target_sid)
         except Exception:
             pass
 
-        # ✅ nettoyer la session sid->player_id si elle existe
         SESSIONS.pop(target_sid, None)
 
-    # ✅ maintenant seulement on remove côté jeu
     remove_player_from_room(room_id, target_player_id, reason="kicked")
 
-    # ✅ broadcast l'état à tous
     if ensure_room(room_id):
         broadcast_room(room_id)
 
@@ -1534,13 +1435,3 @@ def host_play_again(data):
 
     broadcast_room(room_id)
     socketio.emit("back_to_lobby", {"room": room_public_state(room)}, room=room_id)
-
-
-# -----------------------------
-# Main
-# -----------------------------
-load_words()
-
-if __name__ == "__main__":
-    port = int(os.getenv("PORT", "5000"))
-    socketio.run(app, host="0.0.0.0", port=port)
