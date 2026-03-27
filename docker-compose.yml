@@ -35,7 +35,7 @@ services:
     expose:
       - "80"
     environment:
-      - VITE_BACKEND_URL=http://backend:5000
+      - VITE_BACKEND_URL=https://api-danzo.delkadri.com
     depends_on:
       - backend
     restart: unless-stopped
