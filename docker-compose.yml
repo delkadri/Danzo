@@ -34,8 +34,6 @@ services:
     build: ./frontend
     expose:
       - "80"
-    environment:
-      - VITE_BACKEND_URL=https://api-danzo.delkadri.com
     depends_on:
       - backend
     restart: unless-stopped

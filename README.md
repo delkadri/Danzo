@@ -22,6 +22,12 @@ Services :
 - Swagger : `http://localhost:5000/api/docs`
 - PostgreSQL : `localhost:5432`
 
+## Deploiement avec un seul domaine
+
+En production, le frontend Nginx peut servir l'application sur un seul domaine public
+et proxifier `/api` et `/socket.io` vers le backend en interne. Dans ce mode, il n'est
+pas necessaire d'avoir un sous-domaine dedie pour l'API.
+
 ## Run local
 
 ### Base de donnees
