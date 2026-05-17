@@ -1,3 +1,17 @@
+## Danzo
+
+Danzo est un jeu de devinettes en temps reel qui se joue en equipes de 2. A chaque tour, un joueur fait deviner une liste de mots a son coequipier, qui doit les saisir le plus vite possible avant la fin du chrono. Le jeu gere les salons, les equipes, les scores et le classement en direct.
+
+## Comment jouer
+
+1. Un joueur cree une partie et partage le code du salon.
+2. Les autres joueurs rejoignent le salon avec leur pseudo.
+3. L'admin forme des equipes de 2 puis lance la partie.
+4. A chaque tour, le joueur "Describer" choisit une categorie et une difficulte.
+5. Le "Describer" voit les mots et doit les faire deviner oralement au "Guesser".
+6. Le "Guesser" ecrit ses reponses dans les cases. Une reponse exacte donne plus de points, une reponse tres proche peut aussi rapporter des points.
+7. Les tours s'enchainent entre les equipes jusqu'a ce qu'une equipe atteigne le score cible.
+
 ## Architecture
 
 - `frontend/` : interface React + Socket.IO
