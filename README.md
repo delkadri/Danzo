@@ -21,8 +21,6 @@ Danzo est un jeu de devinettes en temps reel qui se joue en equipes de 2. A chaq
 - `backend/app/services/catalog_service.py` : service du catalogue de mots
 - `backend/app/repositories/catalog_repository.py` : acces PostgreSQL
 
-Le fichier `backend/data/words.json` n'est plus la base de donnees du projet. Il sert uniquement de seed initial pour PostgreSQL.
-
 ## Run avec Docker
 
 ```bash
@@ -35,12 +33,6 @@ Services :
 - Backend : `http://localhost:5000`
 - Swagger : `http://localhost:5000/api/docs`
 - PostgreSQL : `localhost:5432`
-
-## Deploiement avec un seul domaine
-
-En production, le frontend Nginx peut servir l'application sur un seul domaine public
-et proxifier `/api` et `/socket.io` vers le backend en interne. Dans ce mode, il n'est
-pas necessaire d'avoir un sous-domaine dedie pour l'API.
 
 ## Run local
 
