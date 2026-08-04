@@ -74,10 +74,7 @@ export default function Home() {
   return (
     <Card className="mx-auto max-w-lg p-4 sm:p-6">
       <div className="rounded-2xl bg-indigo-50 px-4 py-4 dark:bg-indigo-500/10">
-        <div className="text-xs font-black uppercase tracking-[0.18em] text-indigo-600 dark:text-indigo-300">
-          Team word game
-        </div>
-        <div className="mt-1 text-2xl font-black tracking-tight">Ready to play?</div>
+        <div className="text-2xl font-black tracking-tight">Ready to play?</div>
         <div className="mt-1 text-sm leading-6 text-zinc-600 dark:text-zinc-400">
           Guess words with a teammate and race to the top of the ranking.
         </div>
@@ -107,7 +104,7 @@ export default function Home() {
           <label className="block text-sm font-medium text-zinc-700 dark:text-zinc-300">
             Room code
           <Input
-            placeholder="Room code (4 digits)"
+            placeholder="Room code"
             value={joinCode}
             onChange={(e) =>
               setJoinCode(e.target.value.replace(/\D/g, "").slice(0, 4))

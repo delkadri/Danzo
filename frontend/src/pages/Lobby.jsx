@@ -157,7 +157,7 @@ export default function Lobby({ myId, room, roomId, onLeave }) {
     return () => socket.off("teams_saved", onTeamsSaved);
   }, [isHost, roomId]);
 
-  const rulesText = "40s per turn • First team to reach 50+ wins.";
+  const rulesText = "First team to reach 50+ wins.";
 
   // styles helpers
   const dropBase = "rounded-2xl border bg-zinc-50 transition dark:bg-zinc-950";
@@ -178,7 +178,7 @@ export default function Lobby({ myId, room, roomId, onLeave }) {
   const selectedHint = isHost
     ? selectedPlayer
       ? `Selected: ${selectedPlayer.name} — tap a Team or Unassigned`
-      : "Tap a player, then tap a Team (or Unassigned)"
+      : ""
     : "Waiting for admin to create teams and start…";
 
   return (
@@ -201,9 +201,11 @@ export default function Lobby({ myId, room, roomId, onLeave }) {
 
             <div className="mt-2 text-xs text-zinc-500">{rulesText}</div>
 
-            <div className={`mt-3 text-sm leading-5 ${isHost ? "text-zinc-700 dark:text-zinc-300" : "text-zinc-600 dark:text-zinc-400"}`}>
-              <b>{selectedHint}</b>
-            </div>
+            {selectedHint && (
+              <div className={`mt-3 text-sm leading-5 ${isHost ? "text-zinc-700 dark:text-zinc-300" : "text-zinc-600 dark:text-zinc-400"}`}>
+                <b>{selectedHint}</b>
+              </div>
+            )}
           </div>
 
           {/* Leave inside card */}

@@ -188,11 +188,6 @@ export default function App() {
       <header className="mb-4 flex min-h-14 items-center justify-between gap-3 sm:mb-5">
         <div className="min-w-0">
           <div className="truncate text-xl font-black tracking-tight sm:text-2xl">Play Danzo</div>
-          {roomId && (
-            <div className="mt-0.5 truncate text-xs font-medium text-zinc-500 dark:text-zinc-400 sm:text-sm">
-              Room <span className="font-mono font-bold tracking-wider">{roomId}</span>
-            </div>
-          )}
         </div>
         <ThemeToggle
           theme={theme}
