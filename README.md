@@ -70,17 +70,19 @@ Le depot contient une configuration Vercel multi-service :
 - Socket.IO est servi sur `/socket.io`.
 
 Dans Vercel, conserver le preset `Container`, le Root Directory `./` et laisser
-Build Command, Output Directory et Install Command vides. Ajouter au minimum
-les variables d'environnement suivantes avant le deploiement :
+Build Command, Output Directory et Install Command vides. Ajouter les variables
+d'environnement suivantes avant le deploiement :
 
 ```env
-DATABASE_URL=postgresql://user:password@host:5432/database
 SECRET_KEY=change_me
 REST_ADMIN_TOKEN=change_me
-CATALOG_AUTO_SEED=true
+DB_INIT_ON_STARTUP=false
 ```
 
-La base PostgreSQL doit etre hebergee separement : le service `db` de
+`DATABASE_URL` est facultative : sans base disponible, le jeu utilise
+automatiquement `backend/data/words.json`. Pour utiliser PostgreSQL, ajouter
+une URL hebergee (`postgresql://...`) et conserver `DB_INIT_ON_STARTUP=false`
+sur Vercel afin de ne pas bloquer le demarrage du conteneur. Le service `db` de
 `docker-compose.yml` est reserve au developpement local.
 
 ## APIs utiles

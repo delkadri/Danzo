@@ -26,8 +26,13 @@ class Config:
     SQLALCHEMY_TRACK_MODIFICATIONS = False
     SQLALCHEMY_ENGINE_OPTIONS = {
         "pool_pre_ping": True,
+        "connect_args": {"connect_timeout": 3},
     }
 
     CATALOG_AUTO_SEED = os.getenv("CATALOG_AUTO_SEED", "true").lower() == "true"
-    DB_INIT_MAX_ATTEMPTS = int(os.getenv("DB_INIT_MAX_ATTEMPTS", "20"))
-    DB_INIT_RETRY_DELAY_SECONDS = float(os.getenv("DB_INIT_RETRY_DELAY_SECONDS", "2"))
+    DB_INIT_ON_STARTUP = os.getenv(
+        "DB_INIT_ON_STARTUP",
+        "false",
+    ).lower() == "true"
+    DB_INIT_MAX_ATTEMPTS = int(os.getenv("DB_INIT_MAX_ATTEMPTS", "3"))
+    DB_INIT_RETRY_DELAY_SECONDS = float(os.getenv("DB_INIT_RETRY_DELAY_SECONDS", "1"))

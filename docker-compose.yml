@@ -25,6 +25,7 @@ services:
       - CORS_ORIGIN=*
       - DATABASE_URL=postgresql+psycopg://danzo:danzo@db:5432/danzo
       - CATALOG_AUTO_SEED=true
+      - DB_INIT_ON_STARTUP=true
     depends_on:
       db:
         condition: service_healthy

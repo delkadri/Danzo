@@ -3,11 +3,11 @@ import time
 from dotenv import load_dotenv
 from flask import Flask
 
-from .config import Config
-from .extensions import db, socketio
-from .services import catalog_service
-
 load_dotenv()
+
+from .config import Config  # noqa: E402
+from .extensions import db, socketio  # noqa: E402
+from .services import catalog_service  # noqa: E402
 
 app = Flask(__name__)
 app.config.from_object(Config)
@@ -32,7 +32,7 @@ def api_preflight(_any):
     return ("", 204)
 
 
-def initialize_database() -> None:
+def initialize_database() -> bool:
     from . import models  # noqa: F401
 
     attempts = app.config["DB_INIT_MAX_ATTEMPTS"]
@@ -45,16 +45,26 @@ def initialize_database() -> None:
                 db.create_all()
                 if app.config["CATALOG_AUTO_SEED"]:
                     catalog_service.ensure_catalog_seeded(force=False)
-            return
+            return True
         except Exception as exc:  # pragma: no cover - startup path
             last_error = exc
             if attempt == attempts:
                 break
             time.sleep(delay)
 
-    raise RuntimeError(
-        f"Unable to initialize database after {attempts} attempts."
-    ) from last_error
+    app.logger.warning(
+        "Database initialization failed after %s attempt(s); "
+        "the local JSON catalog will be used. Error: %s",
+        attempts,
+        last_error,
+    )
+    return False
 
 
-initialize_database()
+if app.config["DB_INIT_ON_STARTUP"]:
+    initialize_database()
+else:
+    app.logger.info(
+        "Database initialization skipped at startup; "
+        "the database will be checked lazily."
+    )

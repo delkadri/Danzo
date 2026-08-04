@@ -1,7 +1,7 @@
 import os
 
-from app.api.catalog import catalog_bp
 from app.core import app, socketio
+from app.api.catalog import catalog_bp
 
 app.register_blueprint(catalog_bp)
 
