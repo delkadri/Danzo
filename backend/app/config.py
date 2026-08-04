@@ -1,16 +1,28 @@
 import os
 
 
+def get_database_url() -> str:
+    url = os.getenv(
+        "DATABASE_URL",
+        "postgresql+psycopg://danzo:danzo@localhost:5432/danzo",
+    )
+
+    # Managed PostgreSQL providers commonly expose a generic URL. Explicitly
+    # select psycopg 3, which is the driver installed by requirements.txt.
+    if url.startswith("postgres://"):
+        return url.replace("postgres://", "postgresql+psycopg://", 1)
+    if url.startswith("postgresql://"):
+        return url.replace("postgresql://", "postgresql+psycopg://", 1)
+    return url
+
+
 class Config:
     SECRET_KEY = os.getenv("SECRET_KEY", "dev_secret_key")
     CORS_ORIGIN = os.getenv("CORS_ORIGIN", "*")
     REST_ADMIN_TOKEN = os.getenv("REST_ADMIN_TOKEN", "")
     RECONNECT_GRACE_SECONDS = int(os.getenv("RECONNECT_GRACE_SECONDS", "45"))
 
-    SQLALCHEMY_DATABASE_URI = os.getenv(
-        "DATABASE_URL",
-        "postgresql+psycopg://danzo:danzo@localhost:5432/danzo",
-    )
+    SQLALCHEMY_DATABASE_URI = get_database_url()
     SQLALCHEMY_TRACK_MODIFICATIONS = False
     SQLALCHEMY_ENGINE_OPTIONS = {
         "pool_pre_ping": True,
