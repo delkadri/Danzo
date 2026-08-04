@@ -424,6 +424,7 @@ export default function Game({ myId, room, roomId, onLeave }) {
                   ranking.map((r, idx) => {
                     const p1 = r?.players?.[0];
                     const p2 = r?.players?.[1];
+                    const podium = ["🥇", "🥈", "🥉"][idx];
                     const names =
                       p1 && p2 ? `${playerNameById(p1)} & ${playerNameById(p2)}` : "—";
 
@@ -433,7 +434,21 @@ export default function Game({ myId, room, roomId, onLeave }) {
                         className="flex min-w-0 justify-between gap-3 rounded-xl border border-zinc-200 bg-zinc-50 p-3 dark:border-zinc-800 dark:bg-zinc-950"
                       >
                         <div className="flex min-w-0 items-center gap-2">
-                          <Badge>#{idx + 1}</Badge>
+                          <div
+                            className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-full border text-lg font-black shadow-sm ${
+                              idx === 0
+                                ? "border-amber-400/60 bg-amber-400/15"
+                                : idx === 1
+                                ? "border-slate-400/60 bg-slate-400/15"
+                                : idx === 2
+                                ? "border-orange-500/50 bg-orange-500/15"
+                                : "border-indigo-500/40 bg-indigo-500/10 text-sm text-indigo-700 dark:text-indigo-200"
+                            }`}
+                            aria-label={`Rank ${idx + 1}`}
+                            title={`Rank ${idx + 1}`}
+                          >
+                            {podium || idx + 1}
+                          </div>
                           <div className="flex flex-col">
                             <span className="break-words text-sm font-semibold text-zinc-700 dark:text-zinc-300">
                               Team {r.team_id + 1}: {names}
@@ -597,37 +612,35 @@ export default function Game({ myId, room, roomId, onLeave }) {
                   </div>
                 </div>
 
-                <div className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-2 sm:gap-3">
+                <div className="mt-3 grid grid-cols-2 gap-2 sm:gap-3">
                   {boxes.map((b, idx) => (
                     <div
                       key={idx}
-                      className={`rounded-2xl border p-3 transition sm:p-4 ${boxClass(b, isGuesser)}`}
+                      className={`min-w-0 rounded-xl border p-2.5 transition sm:p-3 ${boxClass(b, isGuesser)}`}
                       onClick={() => {
                         if (!isGuesser) return;
                         inputRefs.current[idx]?.focus?.();
                       }}
                     >
-                      <div className="flex items-center justify-between">
-                        <div className="text-xs text-zinc-500">Word #{idx + 1}</div>
-
-                        {(b.status === "exact" || b.status === "close") && (
-                        <Badge
-                          className={
-                            b.status === "exact"
-                              ? "border-emerald-600/50 bg-emerald-600/10"
-                              : "border-yellow-600/50 bg-yellow-600/10"
-                          }
-                        >
-                          +{formatPts(displayedPoints(b.status, ct?.difficulty))}
-                        </Badge>
+                      {(b.status === "exact" || b.status === "close") && (
+                        <div className="flex justify-end">
+                          <Badge
+                            className={
+                              b.status === "exact"
+                                ? "border-emerald-600/50 bg-emerald-600/10"
+                                : "border-yellow-600/50 bg-yellow-600/10"
+                            }
+                          >
+                            +{formatPts(displayedPoints(b.status, ct?.difficulty))}
+                          </Badge>
+                        </div>
                       )}
-                      </div>
 
                       {isGuesser ? (
                         <input
                           ref={(el) => (inputRefs.current[idx] = el)}
-                          className="mt-1 min-h-11 w-full bg-transparent text-base font-semibold outline-none placeholder:text-zinc-400 dark:placeholder:text-zinc-700 sm:mt-2 sm:text-lg"
-                          placeholder="Type here…"
+                          className="min-h-10 w-full min-w-0 bg-transparent text-sm font-semibold outline-none placeholder:text-zinc-400 dark:placeholder:text-zinc-700 sm:text-base"
+                          placeholder="…"
                           value={b.text}
                           onChange={(e) => updateBoxText(idx, e.target.value)}
                           disabled={b.locked}
@@ -637,18 +650,10 @@ export default function Game({ myId, room, roomId, onLeave }) {
                           inputMode="text"
                         />
                       ) : (
-                        <div className="mt-2 min-h-[28px] text-base font-semibold text-zinc-800 dark:text-zinc-200 sm:text-lg">
+                        <div className="flex min-h-10 items-center text-sm font-semibold text-zinc-800 dark:text-zinc-200 sm:text-base">
                           {b.text ? b.text : <span className="text-zinc-400 dark:text-zinc-700">…</span>}
                         </div>
                       )}
-
-                      <div className="mt-2 text-[11px] text-zinc-500">
-                        {b.status === "exact"
-                          ? "Exact"
-                          : b.status === "close"
-                          ? "1–2 typos (editable)"
-                          : ""}
-                      </div>
                     </div>
                   ))}
                 </div>

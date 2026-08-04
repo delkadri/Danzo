@@ -29,6 +29,7 @@ export default function App() {
   const [room, setRoom] = useState(null);
   const [view, setView] = useState("home"); // home | lobby | game
   const [sessionVersion, setSessionVersion] = useState(0);
+  const [leaveConfirmationOpen, setLeaveConfirmationOpen] = useState(false);
   const myIdRef = useRef(null);
 
   // ✅ small modern banner message (ex: kicked)
@@ -63,6 +64,7 @@ export default function App() {
 
   const resetToHome = (msg = "") => {
     if (msg) setSystemMsg(msg);
+    setLeaveConfirmationOpen(false);
     myIdRef.current = null;
     setMyId(null);
     setRoomId(null);
@@ -85,6 +87,10 @@ export default function App() {
     setRoomId(null);
     setRoom(null);
     setView("home");
+  };
+
+  const requestLeave = () => {
+    setLeaveConfirmationOpen(true);
   };
 
   useEffect(() => {
@@ -229,6 +235,44 @@ export default function App() {
         </div>
       )}
 
+      {leaveConfirmationOpen && (
+        <div
+          className="fixed inset-0 z-50 flex items-end justify-center bg-black/55 p-3 backdrop-blur-sm sm:items-center"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="leave-confirmation-title"
+          onClick={() => setLeaveConfirmationOpen(false)}
+        >
+          <div
+            className="safe-bottom w-full max-w-sm"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <Card className="p-4 sm:p-5">
+              <div id="leave-confirmation-title" className="text-lg font-black">
+                Leave the room?
+              </div>
+              <div className="mt-2 text-sm leading-6 text-zinc-600 dark:text-zinc-400">
+                Are you sure you want to leave the current game?
+              </div>
+              <div className="mt-4 grid grid-cols-2 gap-2">
+                <Button variant="ghost" onClick={() => setLeaveConfirmationOpen(false)}>
+                  Cancel
+                </Button>
+                <Button
+                  variant="danger"
+                  onClick={() => {
+                    setLeaveConfirmationOpen(false);
+                    leaveRoom();
+                  }}
+                >
+                  Leave
+                </Button>
+              </div>
+            </Card>
+          </div>
+        </div>
+      )}
+
       {view === "home" && <Home />}
 
       {view === "lobby" && (
@@ -237,7 +281,7 @@ export default function App() {
           myId={myId}
           room={room}
           roomId={roomId}
-          onLeave={leaveRoom}
+          onLeave={requestLeave}
         />
       )}
 
@@ -247,7 +291,7 @@ export default function App() {
           myId={myId}
           room={room}
           roomId={roomId}
-          onLeave={leaveRoom}
+          onLeave={requestLeave}
         />
       )}
     </div>
