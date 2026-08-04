@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { socket } from "./lib/socket";
 
 import Home from "./pages/Home";
@@ -15,12 +15,21 @@ function getInitialTheme() {
   return window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
 }
 
+function viewForRoom(room) {
+  const phase = room?.phase || "lobby";
+  return phase === "playing" || phase === "ranking" || phase === "results"
+    ? "game"
+    : "lobby";
+}
+
 export default function App() {
   const [theme, setTheme] = useState(getInitialTheme);
   const [myId, setMyId] = useState(null);
   const [roomId, setRoomId] = useState(null);
   const [room, setRoom] = useState(null);
   const [view, setView] = useState("home"); // home | lobby | game
+  const [sessionVersion, setSessionVersion] = useState(0);
+  const myIdRef = useRef(null);
 
   // ✅ small modern banner message (ex: kicked)
   const [systemMsg, setSystemMsg] = useState("");
@@ -48,8 +57,13 @@ export default function App() {
     localStorage.removeItem("danzo_name");
   };
 
+  const clearRoomStorage = () => {
+    localStorage.removeItem("danzo_room_id");
+  };
+
   const resetToHome = (msg = "") => {
     if (msg) setSystemMsg(msg);
+    myIdRef.current = null;
     setMyId(null);
     setRoomId(null);
     setRoom(null);
@@ -60,12 +74,13 @@ export default function App() {
   const leaveRoom = () => {
     const rid = roomId;
     // on clear d’abord, comme ça si refresh => pas de rejoin auto
-    clearSessionStorage();
+    clearRoomStorage();
 
     if (rid) {
       socket.emit("leave_room", { room_id: rid });
     }
 
+    myIdRef.current = null;
     setMyId(null);
     setRoomId(null);
     setRoom(null);
@@ -79,9 +94,6 @@ export default function App() {
       const pid = localStorage.getItem("danzo_player_id");
       const name = localStorage.getItem("danzo_name");
 
-      // si déjà dans une room côté state, ne rien faire
-      if (roomId || myId) return;
-
       if (rid && pid && name) {
         socket.emit("join_room", { room_id: rid, name, player_id: pid });
       }
@@ -92,10 +104,13 @@ export default function App() {
       const pid = payload?.player_id;
       if (!rid || !pid) return;
 
+      const joinedRoom = payload?.room || null;
+      myIdRef.current = pid;
       setRoomId(rid);
       setMyId(pid);
-      setView("lobby");
-      setRoom((prev) => prev || { room_id: rid });
+      setRoom(joinedRoom);
+      setView(joinedRoom ? viewForRoom(joinedRoom) : "loading");
+      setSessionVersion((current) => current + 1);
       setSystemMsg("");
 
       // persist for refresh-reconnect
@@ -110,11 +125,12 @@ export default function App() {
 
       // ✅ Si on a un player_id et qu'il n'est plus dans la room => on sort
       // (utile si "kicked" n'arrive pas pour une raison quelconque)
-      if (myId) {
+      const activePlayerId = myIdRef.current;
+      if (activePlayerId) {
         const ids = Array.isArray(newRoom.players)
           ? newRoom.players.map((p) => p?.id).filter(Boolean)
           : [];
-        if (ids.length > 0 && !ids.includes(myId)) {
+        if (ids.length > 0 && !ids.includes(activePlayerId)) {
           resetToHome("You were removed from the room.");
           return;
         }
@@ -122,12 +138,7 @@ export default function App() {
 
       setRoom(newRoom);
 
-      const phase = newRoom.phase || "lobby";
-      if (phase === "playing" || phase === "ranking" || phase === "results") {
-        setView("game");
-      } else {
-        setView("lobby");
-      }
+      setView(viewForRoom(newRoom));
     };
 
     const onGameStarted = (payload) => {
@@ -150,7 +161,7 @@ export default function App() {
       resetToHome(payload?.message || "An admin removed you from the room.");
     };
 
-    socket.on("connected", onConnected);
+    socket.on("connect", onConnected);
     socket.on("room_joined", onRoomJoined);
     socket.on("room_state", onRoomState);
     socket.on("game_started", onGameStarted);
@@ -158,8 +169,12 @@ export default function App() {
     socket.on("error", onError);
     socket.on("kicked", onKicked);
 
+    // The socket can finish connecting before this React effect is mounted.
+    // In that case, restore the stored session immediately.
+    if (socket.connected) onConnected();
+
     return () => {
-      socket.off("connected", onConnected);
+      socket.off("connect", onConnected);
       socket.off("room_joined", onRoomJoined);
       socket.off("room_state", onRoomState);
       socket.off("game_started", onGameStarted);
@@ -167,7 +182,7 @@ export default function App() {
       socket.off("error", onError);
       socket.off("kicked", onKicked);
     };
-  }, [roomId, myId]); // ✅ important: needed for onConnected + onRoomState checks
+  }, []);
 
   // loading safe
   if (view !== "home" && (!roomId || !room)) {
@@ -217,11 +232,23 @@ export default function App() {
       {view === "home" && <Home />}
 
       {view === "lobby" && (
-        <Lobby myId={myId} room={room} roomId={roomId} onLeave={leaveRoom} />
+        <Lobby
+          key={`${roomId}:${sessionVersion}`}
+          myId={myId}
+          room={room}
+          roomId={roomId}
+          onLeave={leaveRoom}
+        />
       )}
 
       {view === "game" && (
-        <Game myId={myId} room={room} roomId={roomId} onLeave={leaveRoom} />
+        <Game
+          key={`${roomId}:${sessionVersion}`}
+          myId={myId}
+          room={room}
+          roomId={roomId}
+          onLeave={leaveRoom}
+        />
       )}
     </div>
   );

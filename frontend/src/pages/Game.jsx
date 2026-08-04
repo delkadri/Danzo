@@ -13,6 +13,29 @@ function makeEmptyBoxes() {
   }));
 }
 
+function boxesFromTurn(turn) {
+  const values = Array.isArray(turn?.guess_boxes) ? turn.guess_boxes : [];
+  const statuses = turn?.word_status || {};
+  const claims = turn?.word_claims || {};
+  const statusByIndex = {};
+
+  Object.entries(claims).forEach(([word, index]) => {
+    if (Number.isInteger(index) && index >= 0 && index < 5) {
+      statusByIndex[index] = statuses[word];
+    }
+  });
+
+  return Array.from({ length: 5 }, (_, index) => {
+    const text = typeof values[index] === "string" ? values[index] : "";
+    const status = statusByIndex[index] || (text ? "wrong" : "empty");
+    return {
+      text,
+      status,
+      locked: status === "exact",
+    };
+  });
+}
+
 function boxClass(box, isGuesser) {
   if (box.status === "exact")
     return "border-emerald-500/50 bg-emerald-500/10 ring-2 ring-emerald-500/15";
@@ -25,6 +48,15 @@ function boxClass(box, isGuesser) {
     ? "border-zinc-200 bg-white focus-within:border-indigo-500/50 focus-within:ring-2 focus-within:ring-indigo-500/15 dark:border-zinc-800 dark:bg-zinc-950"
     : "border-zinc-200 bg-zinc-50 dark:border-zinc-800 dark:bg-zinc-950";
 }
+
+function summaryWordClass(status) {
+  if (status === "exact")
+    return "border-emerald-500/50 bg-emerald-500/10 text-emerald-950 dark:text-emerald-100";
+  if (status === "close")
+    return "border-yellow-500/50 bg-yellow-500/10 text-yellow-950 dark:text-yellow-100";
+  return "border-rose-500/40 bg-rose-500/10 text-rose-950 dark:text-rose-100";
+}
+
 function formatPts(n) {
   // show 0.5 cleanly, no trailing .0
   return Number.isInteger(n) ? String(n) : String(n);
@@ -89,6 +121,7 @@ export default function Game({ myId, room, roomId, onLeave }) {
 
   const lastTurnSummary = room?.last_turn_summary || room?.last_turn || null;
   const lastTurnWords = Array.isArray(lastTurnSummary?.words) ? lastTurnSummary.words : [];
+  const lastTurnWordStatus = lastTurnSummary?.word_status || {};
   const lastTurnPoints =
     typeof lastTurnSummary?.points === "number" ? lastTurnSummary.points : null;
 
@@ -111,9 +144,11 @@ export default function Game({ myId, room, roomId, onLeave }) {
   }, [players]);
 
   useEffect(() => {
-    setRemaining(null);
+    setRemaining(
+      typeof ct.remaining_time === "number" ? ct.remaining_time : null
+    );
     setLocalTurnStarted(!!ct.turn_started);
-    setBoxes(makeEmptyBoxes());
+    setBoxes(boxesFromTurn(ct));
     setCountdown(null);
     setCountdownCat(null);
     setCountdownDiff(null);
@@ -121,6 +156,30 @@ export default function Game({ myId, room, roomId, onLeave }) {
     if (countdownIntervalRef.current) {
       clearInterval(countdownIntervalRef.current);
       countdownIntervalRef.current = null;
+    }
+
+    const countdownDeadline = Number(ct.countdown_deadline_at || 0);
+    if (countdownDeadline > Date.now() / 1000) {
+      const updateCountdown = () => {
+        const seconds = Math.max(
+          0,
+          Math.ceil(countdownDeadline - Date.now() / 1000)
+        );
+        if (seconds <= 0) {
+          setCountdown(null);
+          if (countdownIntervalRef.current) {
+            clearInterval(countdownIntervalRef.current);
+            countdownIntervalRef.current = null;
+          }
+          return;
+        }
+        setCountdown(seconds);
+      };
+
+      setCountdownCat(ct.chosen_category || null);
+      setCountdownDiff(ct.difficulty || null);
+      updateCountdown();
+      countdownIntervalRef.current = setInterval(updateCountdown, 250);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ct.team_id, ct.turn_number]);
@@ -424,14 +483,17 @@ export default function Game({ myId, room, roomId, onLeave }) {
                 </div>
 
                 <div className="mt-3 grid grid-cols-2 gap-2">
-                  {lastTurnWords.map((w) => (
-                    <div
-                      key={w}
-                      className="rounded-xl border border-zinc-200 bg-zinc-50 p-3 dark:border-zinc-800 dark:bg-zinc-950"
-                    >
-                      <div className="font-semibold">{w}</div>
-                    </div>
-                  ))}
+                  {lastTurnWords.map((w) => {
+                    const status = lastTurnWordStatus[w] || "unfound";
+                    return (
+                      <div
+                        key={w}
+                        className={`rounded-xl border p-3 ${summaryWordClass(status)}`}
+                      >
+                        <div className="font-semibold">{w}</div>
+                      </div>
+                    );
+                  })}
                 </div>
               </Card>
             )}
@@ -442,8 +504,6 @@ export default function Game({ myId, room, roomId, onLeave }) {
           <div className="mt-5 grid gap-4">
             {showTurnControl && (
               <Card className="p-4 sm:p-5">
-                <div className="font-bold mb-2">Turn Control</div>
-
                 {!turnStarted && isDescriber && <Button className="w-full" onClick={startTurn}>Start Turn</Button>}
 
                 {!turnStarted && !isDescriber && (
@@ -453,8 +513,8 @@ export default function Game({ myId, room, roomId, onLeave }) {
                 )}
 
                 {turnStarted && !chosenCategory && isDescriber && (
-                  <div className="mt-4">
-                    <div className="mb-2 text-sm text-zinc-600 dark:text-zinc-400">Pick a category (1 out of 2)</div>
+                  <div>
+                    <div className="mb-2 text-sm text-zinc-600 dark:text-zinc-400">Pick a category</div>
                     <div className="grid gap-2 sm:grid-cols-2">
                       {categoryOptions.map((cat) => (
                         <Button className="w-full" key={cat} onClick={() => chooseCategory(cat)}>
@@ -466,14 +526,14 @@ export default function Game({ myId, room, roomId, onLeave }) {
                 )}
 
                 {turnStarted && !chosenCategory && !isDescriber && (
-                  <div className="mt-4 text-sm text-zinc-600 dark:text-zinc-400">
+                  <div className="text-sm text-zinc-600 dark:text-zinc-400">
                     Waiting for <b>{describerName}</b> to choose category…
                   </div>
                 )}
 
                 {/* ✅ NEW: choose difficulty after category */}
                 {turnStarted && chosenCategory && !difficulty && isDescriber && (
-                  <div className="mt-5">
+                  <div>
                     <div className="mb-2 text-sm text-zinc-600 dark:text-zinc-400">
                       Choose difficulty
                     </div>
@@ -489,7 +549,7 @@ export default function Game({ myId, room, roomId, onLeave }) {
                 )}
 
                 {turnStarted && chosenCategory && !difficulty && !isDescriber && (
-                  <div className="mt-4 text-sm text-zinc-600 dark:text-zinc-400">
+                  <div className="text-sm text-zinc-600 dark:text-zinc-400">
                     Waiting for <b>{describerName}</b> to choose difficulty…
                   </div>
                 )}

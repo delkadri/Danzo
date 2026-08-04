@@ -306,6 +306,10 @@ def room_public_state(room: Dict[str, Any]) -> Dict[str, Any]:
         "difficulty": current.get("difficulty"),
         "words": current.get("words"),
         "found_words": current.get("found_words", []),
+        "word_status": current.get("word_status", {}),
+        "word_claims": current.get("word_claims", {}),
+        "guess_boxes": current.get("guess_boxes", ["", "", "", "", ""]),
+        "countdown_deadline_at": current.get("countdown_deadline_at"),
         "remaining_time": current.get("remaining_time"),
         "round": current.get("round"),
         "turn_number": current.get("turn_number"),
@@ -474,6 +478,7 @@ def prepare_next_turn(room: Dict[str, Any]) -> None:
         "word_status": {},
         "word_claims": {},
         "guess_boxes": ["", "", "", "", ""],
+        "countdown_deadline_at": None,
     }
     room["turn_number"] += 1
 
@@ -500,6 +505,7 @@ def end_team_turn(room_id: str, reason: str) -> None:
     room["last_turn_summary"] = {
         "team_id": team_id,
         "words": ct.get("words") or [],
+        "word_status": dict(ct.get("word_status") or {}),
         "points": float(ct.get("turn_points") or 0),
     }
 
@@ -547,6 +553,7 @@ def start_round_after_countdown(room_id: str, delay: int = 3) -> None:
                 if not ct.get("chosen_category") or not ct.get("words"):
                     return
 
+                ct["countdown_deadline_at"] = None
                 ct["remaining_time"] = room["settings"]["time_limit"]
                 broadcast_room(room_id)
                 start_timer(room_id)
@@ -981,6 +988,12 @@ def on_disconnect(reason=None):
             if not p:
                 return
 
+            # A refreshed page can reconnect before the previous socket emits
+            # its disconnect event. Ignore that stale disconnect so it cannot
+            # overwrite the newer player session.
+            if p.get("sid") != sid:
+                return
+
             # mark disconnected (do not delete immediately)
             p["connected"] = False
             p["sid"] = None
@@ -1002,10 +1015,15 @@ def on_disconnect(reason=None):
                 if pp.get("connected") is True:
                     return  # reconnected
 
-                # if disconnected during active turn -> end turn
+                # During a game, keep the player's roster/team position so a
+                # mobile refresh or a longer interruption can still rejoin.
                 ct = r.get("current_turn") or {}
-                if r.get("phase") == "playing" and player_id in [ct.get("describer_id"), ct.get("guesser_id")]:
-                    end_team_turn(room_id, reason="player_left")
+                if r.get("phase") in ["playing", "ranking", "results"]:
+                    if r.get("phase") == "playing" and player_id in [
+                        ct.get("describer_id"),
+                        ct.get("guesser_id"),
+                    ]:
+                        end_team_turn(room_id, reason="player_left")
                     return
 
                 # remove for real
@@ -1090,7 +1108,14 @@ def create_room(data):
     bind_session(room_id, player_id, request.sid)
     join_room(room_id)
 
-    emit("room_joined", {"room_id": room_id, "player_id": player_id})
+    emit(
+        "room_joined",
+        {
+            "room_id": room_id,
+            "player_id": player_id,
+            "room": room_public_state(room),
+        },
+    )
     broadcast_room(room_id)
     resume_room_timer(room_id, room)
 
@@ -1132,6 +1157,13 @@ def join_room_event(data):
         }
     else:
         # reconnect: update sid, mark connected
+        previous_sid = room["players"][player_id].get("sid")
+        if previous_sid and previous_sid != request.sid:
+            SESSIONS.pop(previous_sid, None)
+            try:
+                leave_room(room_id, sid=previous_sid)
+            except Exception:
+                pass
         room["players"][player_id]["sid"] = request.sid
         room["players"][player_id]["connected"] = True
         room["players"][player_id]["name"] = name  # optional
@@ -1139,7 +1171,14 @@ def join_room_event(data):
     bind_session(room_id, player_id, request.sid)
     join_room(room_id)
 
-    emit("room_joined", {"room_id": room_id, "player_id": player_id})
+    emit(
+        "room_joined",
+        {
+            "room_id": room_id,
+            "player_id": player_id,
+            "room": room_public_state(room),
+        },
+    )
     broadcast_room(room_id)
     resume_room_timer(room_id, room)
 
@@ -1162,6 +1201,22 @@ def leave_room_event(data):
         leave_room(room_id)
     except Exception:
         pass
+
+    if room.get("phase") in ["playing", "ranking", "results"]:
+        player = room.get("players", {}).get(player_id)
+        if player:
+            player["connected"] = False
+            player["sid"] = None
+
+        ct = room.get("current_turn") or {}
+        if room.get("phase") == "playing" and player_id in [
+            ct.get("describer_id"),
+            ct.get("guesser_id"),
+        ]:
+            end_team_turn(room_id, reason="player_left")
+        else:
+            broadcast_room(room_id)
+        return
 
     remove_player_from_room(room_id, player_id, reason="left")
 
@@ -1368,6 +1423,7 @@ def choose_category(data):
     ct["found_words"] = []
     ct["guess_boxes"] = ["", "", "", "", ""]
     ct["turn_points"] = 0.0
+    ct["countdown_deadline_at"] = None
     ct["remaining_time"] = None
 
     socketio.emit("category_chosen", {"category": category}, room=room_id)
@@ -1414,6 +1470,7 @@ def choose_difficulty(data):
     ct["found_words"] = []
     ct["guess_boxes"] = ["", "", "", "", ""]
     ct["turn_points"] = 0.0
+    ct["countdown_deadline_at"] = time.time() + 3
     ct["remaining_time"] = None
 
     socketio.emit("difficulty_chosen", {"difficulty": difficulty, "words": words}, room=room_id)
