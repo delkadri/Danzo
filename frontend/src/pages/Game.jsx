@@ -101,6 +101,9 @@ export default function Game({ myId, room, roomId, onLeave }) {
 
   const submitTimersRef = useRef({});
   const inputRefs = useRef(Array.from({ length: 5 }, () => null));
+  const latestRevisionRef = useRef(Array.from({ length: 5 }, () => 0));
+  const composingRef = useRef(Array.from({ length: 5 }, () => false));
+  const isGuesserRef = useRef(false);
   const countdownIntervalRef = useRef(null);
 
   const ct = room?.current_turn || {};
@@ -113,6 +116,10 @@ export default function Game({ myId, room, roomId, onLeave }) {
   const isDescriber = myId === describerId;
   const isGuesser = myId === guesserId;
   const isHost = room?.host_id === myId;
+
+  useEffect(() => {
+    isGuesserRef.current = isGuesser;
+  }, [isGuesser]);
 
   const categoryOptions = ct.category_options || [];
   const chosenCategory = ct.chosen_category;
@@ -149,6 +156,13 @@ export default function Game({ myId, room, roomId, onLeave }) {
     );
     setLocalTurnStarted(!!ct.turn_started);
     setBoxes(boxesFromTurn(ct));
+    latestRevisionRef.current = Array.from({ length: 5 }, (_, index) => {
+      const revision = ct.guess_box_revisions?.[index];
+      return Number.isInteger(revision) ? revision : 0;
+    });
+    composingRef.current.fill(false);
+    Object.values(submitTimersRef.current).forEach(clearTimeout);
+    submitTimersRef.current = {};
     setCountdown(null);
     setCountdownCat(null);
     setCountdownDiff(null);
@@ -186,6 +200,9 @@ export default function Game({ myId, room, roomId, onLeave }) {
 
   useEffect(() => {
     return () => {
+      Object.values(submitTimersRef.current).forEach(clearTimeout);
+      submitTimersRef.current = {};
+
       if (countdownIntervalRef.current) {
         clearInterval(countdownIntervalRef.current);
         countdownIntervalRef.current = null;
@@ -218,6 +235,20 @@ export default function Game({ myId, room, roomId, onLeave }) {
     function onGuessBoxesUpdate(payload) {
       const incoming = payload?.boxes;
       if (!Array.isArray(incoming)) return;
+      const incomingRevisions = Array.isArray(payload?.revisions) ? payload.revisions : [];
+
+      incomingRevisions.forEach((revision, index) => {
+        if (Number.isInteger(revision)) {
+          latestRevisionRef.current[index] = Math.max(
+            latestRevisionRef.current[index] || 0,
+            revision
+          );
+        }
+      });
+
+      // The guesser's local input is authoritative while typing. Applying the
+      // server echo here can replace newer keystrokes with an older response.
+      if (isGuesserRef.current) return;
 
       setBoxes((prev) =>
         prev.map((b, i) => ({
@@ -230,14 +261,18 @@ export default function Game({ myId, room, roomId, onLeave }) {
     function onGuessBoxResult(payload) {
       const idx = payload?.index;
       const status = payload?.status;
+      const revision = payload?.revision;
 
       if (typeof idx !== "number" || idx < 0 || idx > 4) return;
+      if (Number.isInteger(revision) && revision < latestRevisionRef.current[idx]) {
+        return;
+      }
+      const shouldLock = status === "exact";
 
       setBoxes((prev) => {
         const next = [...prev];
         const cur = next[idx] || { text: "", status: "empty", locked: false };
 
-        const shouldLock = status === "exact";
         const nextStatus =
           status === "exact" || status === "close" || status === "wrong"
             ? status
@@ -246,6 +281,23 @@ export default function Game({ myId, room, roomId, onLeave }) {
         next[idx] = { ...cur, status: nextStatus, locked: shouldLock ? true : false };
         return next;
       });
+
+      if (
+        shouldLock &&
+        isGuesserRef.current &&
+        document.activeElement === inputRefs.current[idx]
+      ) {
+        window.requestAnimationFrame(() => {
+          for (let nextIndex = idx + 1; nextIndex < inputRefs.current.length; nextIndex += 1) {
+            const input = inputRefs.current[nextIndex];
+            if (input && !input.disabled) {
+              input.focus();
+              return;
+            }
+          }
+          inputRefs.current[idx]?.blur();
+        });
+      }
     }
 
     // ✅ after category chosen: reset UI + WAIT FOR difficulty selection
@@ -254,6 +306,9 @@ export default function Game({ myId, room, roomId, onLeave }) {
       setCountdownCat(cat || null);
 
       setBoxes(makeEmptyBoxes());
+      latestRevisionRef.current.fill(0);
+      Object.values(submitTimersRef.current).forEach(clearTimeout);
+      submitTimersRef.current = {};
       setRemaining(null);
       setCountdown(null);
       setCountdownDiff(null);
@@ -270,6 +325,9 @@ export default function Game({ myId, room, roomId, onLeave }) {
       setCountdownDiff(diff);
 
       setBoxes(makeEmptyBoxes());
+      latestRevisionRef.current.fill(0);
+      Object.values(submitTimersRef.current).forEach(clearTimeout);
+      submitTimersRef.current = {};
       setRemaining(null);
 
       if (countdownIntervalRef.current) {
@@ -325,24 +383,73 @@ export default function Game({ myId, room, roomId, onLeave }) {
     socket.emit("choose_difficulty", { room_id: roomId, difficulty: diff });
   };
 
+  const submitBox = (index, val, revision) => {
+    socket.emit("submit_guess_box", {
+      room_id: roomId,
+      index,
+      guess: val,
+      revision,
+    });
+  };
+
+  const scheduleBoxSubmission = (index, val, revision) => {
+    const timers = submitTimersRef.current;
+    if (timers[index]) clearTimeout(timers[index]);
+
+    timers[index] = setTimeout(() => {
+      delete timers[index];
+      submitBox(index, val, revision);
+    }, 300);
+  };
+
   const updateBoxText = (index, val) => {
     setBoxes((prev) => {
       const next = [...prev];
       if (!next[index] || next[index].locked) return prev;
-      next[index] = { ...next[index], text: val };
+      next[index] = {
+        ...next[index],
+        text: val,
+        status: val ? "typing" : "empty",
+      };
       return next;
     });
 
     if (!isGuesser) return;
 
-    socket.emit("guess_boxes_typing", { room_id: roomId, index, text: val });
+    const revision = latestRevisionRef.current[index] + 1;
+    latestRevisionRef.current[index] = revision;
 
+    socket.emit("guess_boxes_typing", {
+      room_id: roomId,
+      index,
+      text: val,
+      revision,
+    });
+
+    if (!composingRef.current[index]) {
+      scheduleBoxSubmission(index, val, revision);
+    }
+  };
+
+  const flushBoxSubmission = (index, val) => {
     const timers = submitTimersRef.current;
-    if (timers[index]) clearTimeout(timers[index]);
+    if (!timers[index]) return;
 
-    timers[index] = setTimeout(() => {
-      socket.emit("submit_guess_box", { room_id: roomId, index, guess: val });
-    }, 220);
+    clearTimeout(timers[index]);
+    delete timers[index];
+    submitBox(index, val, latestRevisionRef.current[index]);
+  };
+
+  const focusNextBox = (index) => {
+    for (let nextIndex = index + 1; nextIndex < inputRefs.current.length; nextIndex += 1) {
+      const input = inputRefs.current[nextIndex];
+      if (input && !input.disabled) {
+        input.focus();
+        return;
+      }
+    }
+
+    inputRefs.current[index]?.blur();
   };
 
   const ranking = room?.ranking || [];
@@ -588,8 +695,6 @@ export default function Game({ myId, room, roomId, onLeave }) {
 
             {roundActive && !isGuesser && words && words.length > 0 && (
               <Card className="p-4 sm:p-5">
-                <div className="font-bold mb-3">Words (visible to spectators + describer)</div>
-
                 <div className="grid grid-cols-2 gap-2">
                   {words.map((w) => (
                     <div
@@ -616,14 +721,14 @@ export default function Game({ myId, room, roomId, onLeave }) {
                   {boxes.map((b, idx) => (
                     <div
                       key={idx}
-                      className={`min-w-0 rounded-xl border p-2.5 transition sm:p-3 ${boxClass(b, isGuesser)}`}
+                      className={`relative min-w-0 overflow-hidden rounded-xl border p-2 transition sm:p-3 ${boxClass(b, isGuesser)}`}
                       onClick={() => {
                         if (!isGuesser) return;
                         inputRefs.current[idx]?.focus?.();
                       }}
                     >
                       {(b.status === "exact" || b.status === "close") && (
-                        <div className="flex justify-end">
+                        <div className="absolute right-2 top-2">
                           <Badge
                             className={
                               b.status === "exact"
@@ -639,18 +744,45 @@ export default function Game({ myId, room, roomId, onLeave }) {
                       {isGuesser ? (
                         <input
                           ref={(el) => (inputRefs.current[idx] = el)}
-                          className="min-h-10 w-full min-w-0 bg-transparent text-sm font-semibold outline-none placeholder:text-zinc-400 dark:placeholder:text-zinc-700 sm:text-base"
+                          className={`min-h-11 w-full min-w-0 bg-transparent text-base font-semibold outline-none placeholder:text-zinc-400 dark:placeholder:text-zinc-700 ${
+                            b.status === "exact" || b.status === "close" ? "pr-10" : ""
+                          }`}
                           placeholder="…"
                           value={b.text}
                           onChange={(e) => updateBoxText(idx, e.target.value)}
+                          onBlur={(e) => flushBoxSubmission(idx, e.target.value)}
+                          onCompositionStart={() => {
+                            composingRef.current[idx] = true;
+                            const timer = submitTimersRef.current[idx];
+                            if (timer) {
+                              clearTimeout(timer);
+                              delete submitTimersRef.current[idx];
+                            }
+                          }}
+                          onCompositionEnd={(e) => {
+                            composingRef.current[idx] = false;
+                            updateBoxText(idx, e.currentTarget.value);
+                          }}
+                          onKeyDown={(e) => {
+                            if (e.key !== "Enter" || e.isComposing) return;
+                            e.preventDefault();
+                            flushBoxSubmission(idx, e.currentTarget.value);
+                            focusNextBox(idx);
+                          }}
                           disabled={b.locked}
+                          maxLength={60}
+                          aria-label={`Answer ${idx + 1}`}
                           autoComplete="off"
                           autoCorrect="off"
                           spellCheck={false}
                           inputMode="text"
+                          enterKeyHint={idx === boxes.length - 1 ? "done" : "next"}
                         />
                       ) : (
-                        <div className="flex min-h-10 items-center text-sm font-semibold text-zinc-800 dark:text-zinc-200 sm:text-base">
+                        <div
+                          className="flex min-h-11 min-w-0 items-center truncate text-base font-semibold text-zinc-800 dark:text-zinc-200"
+                          title={b.text || undefined}
+                        >
                           {b.text ? b.text : <span className="text-zinc-400 dark:text-zinc-700">…</span>}
                         </div>
                       )}
