@@ -26,6 +26,12 @@ export default function App() {
   const [systemMsg, setSystemMsg] = useState("");
 
   useEffect(() => {
+    if (!systemMsg) return undefined;
+    const timeoutId = window.setTimeout(() => setSystemMsg(""), 5000);
+    return () => window.clearTimeout(timeoutId);
+  }, [systemMsg]);
+
+  useEffect(() => {
     const isDark = theme === "dark";
     document.documentElement.classList.toggle("dark", isDark);
     document.documentElement.style.colorScheme = theme;
@@ -197,17 +203,14 @@ export default function App() {
 
       {/* ✅ System banner (kicked, etc.) */}
       {systemMsg && (
-        <div className="mb-4 flex items-start justify-between gap-3 rounded-2xl border border-rose-500/30 bg-rose-500/10 px-4 py-3 text-sm text-zinc-800 dark:text-zinc-200">
+        <div
+          className="mb-4 rounded-2xl border border-rose-500/30 bg-rose-500/10 px-4 py-3 text-sm text-zinc-800 dark:text-zinc-200"
+          role="status"
+        >
           <div className="min-w-0">
             <div className="font-bold">Removed from the room</div>
             <div className="text-zinc-600 dark:text-zinc-300">{systemMsg}</div>
           </div>
-          <button
-            onClick={() => setSystemMsg("")}
-            className="min-h-11 shrink-0 rounded-xl border border-zinc-300 bg-white px-3 text-xs font-semibold text-zinc-700 hover:border-zinc-400 dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-200 dark:hover:border-zinc-700"
-          >
-            OK
-          </button>
         </div>
       )}
 

@@ -705,7 +705,8 @@ def api_kick(room_id):
     if player_id == room.get("host_id"):
         return jsonify({"error": "Cannot kick host"}), 400
 
-    # notify + disconnect socket if possible
+    # Notify and remove the player from the room, but keep the socket connected
+    # so they can immediately join again from the home screen.
     target_sid = get_player_sid(room, player_id)
 
     ok = remove_player_from_room(rid, player_id, reason="kicked")
@@ -714,10 +715,6 @@ def api_kick(room_id):
         try:
             socketio.emit("kicked", {"room_id": rid, "message": "Removed by admin (REST)."}, to=target_sid)
             leave_room(rid, sid=target_sid)
-        except Exception:
-            pass
-        try:
-            socketio.server.disconnect(target_sid)
         except Exception:
             pass
         SESSIONS.pop(target_sid, None)
@@ -1579,11 +1576,6 @@ def host_kick_player(data):
 
         try:
             leave_room(room_id, sid=target_sid)
-        except Exception:
-            pass
-
-        try:
-            socketio.server.disconnect(target_sid)
         except Exception:
             pass
 

@@ -173,7 +173,7 @@ export default function Lobby({ myId, room, roomId, onLeave }) {
     "border-indigo-500/60 bg-indigo-500/10 ring-2 ring-indigo-500/20";
 
   const kickBtn =
-    "absolute -right-3 -top-3 z-10 flex h-11 w-11 items-center justify-center rounded-full border border-zinc-300 bg-white text-base leading-none text-zinc-600 shadow-sm hover:border-rose-500/40 hover:bg-rose-500/10 hover:text-rose-600 dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-300 dark:hover:text-rose-300";
+    "absolute -right-2 -top-2 z-10 flex h-8 w-8 items-center justify-center rounded-full border border-zinc-300 bg-white text-xs leading-none text-zinc-600 shadow-sm hover:border-rose-500/40 hover:bg-rose-500/10 hover:text-rose-600 dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-300 dark:hover:text-rose-300";
 
   const selectedHint = isHost
     ? selectedPlayer
@@ -263,6 +263,7 @@ export default function Lobby({ myId, room, roomId, onLeave }) {
                       {/* ✅ Kick button (admin only, cannot kick self) */}
                       {isHost && p.id !== myId && (
                         <button
+                          type="button"
                           className={kickBtn}
                           onClick={(e) => {
                             e.stopPropagation();
@@ -353,6 +354,7 @@ export default function Lobby({ myId, room, roomId, onLeave }) {
                             {/* ✅ Kick button (admin only, cannot kick self) */}
                             {isHost && pid !== myId && (
                               <button
+                                type="button"
                                 className={kickBtn}
                                 onClick={(e) => {
                                   e.stopPropagation();
