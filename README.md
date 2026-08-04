@@ -77,7 +77,19 @@ d'environnement suivantes avant le deploiement :
 SECRET_KEY=change_me
 REST_ADMIN_TOKEN=change_me
 DB_INIT_ON_STARTUP=false
+REDIS_URL=rediss://default:password@host:port
+REDIS_REQUIRED=true
+ROOM_TTL_SECONDS=43200
 ```
+
+`REDIS_URL` est obligatoire en production pour partager les salons et les
+evenements Socket.IO entre les instances Vercel. Installer une integration
+Redis (par exemple Upstash) depuis le Vercel Marketplace et connecter la base
+au projet ; Vercel injecte alors `REDIS_URL`. Les salons expirent apres 12 heures
+sans activite par defaut. `REDIS_REQUIRED=true` empeche la creation d'un salon
+qui ne serait conserve que dans la memoire temporaire d'une instance Vercel.
+Apres le deploiement, `GET /api/health` doit afficher `redis: "up"` et
+`shared_rooms: true`.
 
 `DATABASE_URL` est facultative : sans base disponible, le jeu utilise
 automatiquement `backend/data/words.json`. Pour utiliser PostgreSQL, ajouter

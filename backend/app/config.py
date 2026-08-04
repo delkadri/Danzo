@@ -21,6 +21,18 @@ class Config:
     CORS_ORIGIN = os.getenv("CORS_ORIGIN", "*")
     REST_ADMIN_TOKEN = os.getenv("REST_ADMIN_TOKEN", "")
     RECONNECT_GRACE_SECONDS = int(os.getenv("RECONNECT_GRACE_SECONDS", "45"))
+    REDIS_URL = os.getenv("REDIS_URL", "").strip()
+    REDIS_REQUIRED = os.getenv(
+        "REDIS_REQUIRED",
+        "true" if os.getenv("VERCEL") else "false",
+    ).lower() == "true"
+    ROOM_TTL_SECONDS = int(os.getenv("ROOM_TTL_SECONDS", "43200"))
+    DEPLOYMENT_ENV = os.getenv("VERCEL_ENV", "local")
+    ROOM_STORE_PREFIX = os.getenv("ROOM_STORE_PREFIX", f"danzo:{DEPLOYMENT_ENV}")
+    SOCKETIO_REDIS_CHANNEL = os.getenv(
+        "SOCKETIO_REDIS_CHANNEL",
+        f"danzo-socketio-{DEPLOYMENT_ENV}",
+    )
 
     SQLALCHEMY_DATABASE_URI = get_database_url()
     SQLALCHEMY_TRACK_MODIFICATIONS = False

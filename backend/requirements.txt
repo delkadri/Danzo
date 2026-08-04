@@ -6,3 +6,4 @@ python-dotenv==1.0.1
 gunicorn==22.0.0
 flask-cors
 psycopg[binary]==3.2.6
+redis==5.2.1

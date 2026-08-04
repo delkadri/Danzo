@@ -5,5 +5,5 @@ const backendUrl = import.meta.env.VITE_BACKEND_URL?.trim() || window.location.o
 
 export const socket = io(backendUrl, {
   path: "/socket.io",
-  transports: ["websocket", "polling"],
+  transports: ["websocket"],
 });

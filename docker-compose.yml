@@ -1,4 +1,15 @@
 services:
+  redis:
+    image: redis:7-alpine
+    expose:
+      - "6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
   db:
     image: postgres:16-alpine
     environment:
@@ -23,10 +34,13 @@ services:
     environment:
       - PORT=5000
       - CORS_ORIGIN=*
+      - REDIS_URL=redis://redis:6379/0
       - DATABASE_URL=postgresql+psycopg://danzo:danzo@db:5432/danzo
       - CATALOG_AUTO_SEED=true
       - DB_INIT_ON_STARTUP=true
     depends_on:
+      redis:
+        condition: service_healthy
       db:
         condition: service_healthy
     restart: unless-stopped

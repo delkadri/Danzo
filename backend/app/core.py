@@ -13,10 +13,16 @@ app = Flask(__name__)
 app.config.from_object(Config)
 
 db.init_app(app)
-socketio.init_app(
-    app,
-    cors_allowed_origins=app.config["CORS_ORIGIN"],
-)
+socketio_options = {
+    "cors_allowed_origins": app.config["CORS_ORIGIN"],
+}
+if app.config["REDIS_URL"]:
+    socketio_options.update(
+        message_queue=app.config["REDIS_URL"],
+        channel=app.config["SOCKETIO_REDIS_CHANNEL"],
+    )
+
+socketio.init_app(app, **socketio_options)
 
 
 @app.after_request

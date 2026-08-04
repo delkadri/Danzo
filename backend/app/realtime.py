@@ -1,7 +1,10 @@
+import math
 import random
 import re
+import time
 import unicodedata
 import uuid
+from functools import wraps
 from typing import Dict, Any, List, Optional, Tuple
 
 from flask import jsonify, request
@@ -11,6 +14,7 @@ from .auth import require_admin_rest
 from .constants import ALL_CATEGORIES, DEFAULT_SETTINGS, DIFFICULTIES, TARGET_SCORE
 from .core import app
 from .extensions import socketio
+from .room_store import RoomStore, RoomStoreError
 from .services import catalog_service
 
 
@@ -18,16 +22,23 @@ from .services import catalog_service
 # Game constants
 # -----------------------------
 RECONNECT_GRACE_SECONDS = int(app.config["RECONNECT_GRACE_SECONDS"])
+ROOM_STORE = RoomStore(
+    redis_url=app.config["REDIS_URL"],
+    ttl_seconds=app.config["ROOM_TTL_SECONDS"],
+    key_prefix=app.config["ROOM_STORE_PREFIX"],
+)
 
 # -----------------------------
-# In-memory storage
+# Local connection cache
 # -----------------------------
-# ROOMS[room_id] = room dict
+# Redis is authoritative in production. This cache keeps the currently handled
+# room object available to nested helpers on the same instance.
 ROOMS: Dict[str, Dict[str, Any]] = {}
 
 # SESSIONS maps current socket sid -> session info
 # This lets us know (room_id, player_id) when the socket disconnects.
 SESSIONS: Dict[str, Dict[str, str]] = {}
+ACTIVE_TIMER_ROOMS: set[str] = set()
 
 
 # -----------------------------
@@ -44,7 +55,7 @@ def get_player_sid(room: Dict[str, Any], player_id: str) -> Optional[str]:
 def new_player_id() -> str:
     return uuid.uuid4().hex
 
-def normalize_room_id(room_id: str) -> str:
+def normalize_room_id(room_id: Any) -> str:
     rid = str(room_id or "").strip().upper()
     if not re.fullmatch(r"\d{4}", rid):
         return ""
@@ -62,7 +73,90 @@ def get_session_player(room_id: str, sid: str) -> Optional[str]:
     return s.get("player_id")
 
 def ensure_room(room_id: str) -> Optional[Dict[str, Any]]:
+    room_id = normalize_room_id(room_id)
+    if not room_id:
+        return None
+
+    if ROOM_STORE.enabled:
+        try:
+            room = ROOM_STORE.get(room_id)
+            if room is None:
+                ROOMS.pop(room_id, None)
+                return None
+            ROOMS[room_id] = room
+            return room
+        except RoomStoreError:
+            app.logger.exception("Unable to load room %s from Redis.", room_id)
+
     return ROOMS.get(room_id)
+
+
+def persist_room(room: Dict[str, Any]) -> None:
+    room_id = normalize_room_id(room.get("room_id"))
+    if not room_id:
+        return
+    ROOMS[room_id] = room
+    if ROOM_STORE.enabled:
+        try:
+            ROOM_STORE.save(room)
+        except RoomStoreError:
+            app.logger.exception("Unable to persist room %s to Redis.", room_id)
+
+
+def room_exists(room_id: str) -> bool:
+    room_id = normalize_room_id(room_id)
+    if not room_id:
+        return False
+    if ROOM_STORE.enabled:
+        try:
+            return ROOM_STORE.exists(room_id)
+        except RoomStoreError:
+            app.logger.exception("Unable to check room %s in Redis.", room_id)
+    return room_id in ROOMS
+
+
+def delete_room(room_id: str) -> None:
+    room_id = normalize_room_id(room_id)
+    if not room_id:
+        return
+    ROOMS.pop(room_id, None)
+    if ROOM_STORE.enabled:
+        try:
+            ROOM_STORE.delete(room_id)
+        except RoomStoreError:
+            app.logger.exception("Unable to delete room %s from Redis.", room_id)
+
+
+def synchronized_room_event(handler):
+    @wraps(handler)
+    def wrapped(data=None, *args, **kwargs):
+        payload = data if isinstance(data, dict) else {}
+        room_id = normalize_room_id(payload.get("room_id"))
+        if not room_id:
+            return handler(data, *args, **kwargs)
+        try:
+            with ROOM_STORE.lock(room_id):
+                return handler(data, *args, **kwargs)
+        except RoomStoreError:
+            app.logger.exception("Unable to synchronize room event for %s.", room_id)
+            emit("error", {"message": "The room is temporarily unavailable. Please retry."})
+            return None
+
+    return wrapped
+
+
+def synchronized_room_route(handler):
+    @wraps(handler)
+    def wrapped(room_id, *args, **kwargs):
+        normalized = normalize_room_id(room_id)
+        try:
+            with ROOM_STORE.lock(normalized):
+                return handler(room_id, *args, **kwargs)
+        except RoomStoreError:
+            app.logger.exception("Unable to synchronize room route for %s.", normalized)
+            return jsonify({"error": "The room is temporarily unavailable."}), 503
+
+    return wrapped
 
 def is_host(room: Dict[str, Any], player_id: str) -> bool:
     return room.get("host_id") == player_id
@@ -245,7 +339,9 @@ def broadcast_room(room_id: str) -> None:
     room = ROOMS.get(room_id)
     if not room:
         return
-    socketio.emit("room_state", {"room": room_public_state(room)}, room=room_id)
+    public_state = room_public_state(room)
+    persist_room(room)
+    socketio.emit("room_state", {"room": public_state}, room=room_id)
 
 
 # -----------------------------
@@ -254,36 +350,66 @@ def broadcast_room(room_id: str) -> None:
 def stop_timer(room: Dict[str, Any]) -> None:
     room["timer_task"] = None
 
-def start_timer(room_id: str) -> None:
+def start_timer(room_id: str, resume: bool = False) -> None:
     room = ROOMS.get(room_id)
     if not room:
         return
+    ct = room.get("current_turn") or {}
+    remaining = int(ct.get("remaining_time") or 0)
+    if remaining <= 0:
+        return
+
     stop_timer(room)
     room["timer_task"] = True
+    if not resume or not ct.get("deadline_at"):
+        ct["deadline_at"] = time.time() + remaining
+    persist_room(room)
+
+    if room_id in ACTIVE_TIMER_ROOMS:
+        return
+    ACTIVE_TIMER_ROOMS.add(room_id)
     socketio.start_background_task(timer_loop, room_id)
 
 def timer_loop(room_id: str) -> None:
-    room = ROOMS.get(room_id)
-    if not room:
-        return
+    try:
+        while True:
+            try:
+                with ROOM_STORE.lock(room_id):
+                    room = ensure_room(room_id)
+                    if not room or room.get("timer_task") is None:
+                        return
 
-    while True:
-        if room.get("timer_task") is None:
-            return
+                    ct = room.get("current_turn")
+                    if not ct:
+                        return
 
-        ct = room.get("current_turn")
-        if not ct:
-            return
+                    deadline = float(ct.get("deadline_at") or time.time())
+                    remaining = max(0, math.ceil(deadline - time.time()))
+                    ct["remaining_time"] = remaining
 
-        remaining = ct.get("remaining_time", 0)
-        if remaining <= 0:
-            socketio.emit("timer_update", {"remaining": 0}, room=room_id)
-            end_team_turn(room_id, reason="time_up")
-            return
+                    if remaining <= 0:
+                        socketio.emit("timer_update", {"remaining": 0}, room=room_id)
+                        end_team_turn(room_id, reason="time_up")
+                        return
 
-        socketio.emit("timer_update", {"remaining": remaining}, room=room_id)
-        ct["remaining_time"] = remaining - 1
-        socketio.sleep(1)
+                    persist_room(room)
+                    socketio.emit("timer_update", {"remaining": remaining}, room=room_id)
+            except RoomStoreError:
+                app.logger.exception("Timer synchronization failed for room %s.", room_id)
+                return
+            socketio.sleep(1)
+    finally:
+        ACTIVE_TIMER_ROOMS.discard(room_id)
+
+
+def resume_room_timer(room_id: str, room: Dict[str, Any]) -> None:
+    ct = room.get("current_turn") or {}
+    if (
+        room.get("phase") == "playing"
+        and room.get("timer_task") is not None
+        and ct.get("remaining_time") is not None
+    ):
+        start_timer(room_id, resume=True)
 
 
 # -----------------------------
@@ -409,19 +535,23 @@ def end_team_turn(room_id: str, reason: str) -> None:
 def start_round_after_countdown(room_id: str, delay: int = 3) -> None:
     def _run():
         socketio.sleep(delay)
-        room = ROOMS.get(room_id)
-        if not room:
-            return
-        ct = room.get("current_turn") or {}
+        try:
+            with ROOM_STORE.lock(room_id):
+                room = ensure_room(room_id)
+                if not room:
+                    return
+                ct = room.get("current_turn") or {}
 
-        if room.get("phase") != "playing":
-            return
-        if not ct.get("chosen_category") or not ct.get("words"):
-            return
+                if room.get("phase") != "playing":
+                    return
+                if not ct.get("chosen_category") or not ct.get("words"):
+                    return
 
-        ct["remaining_time"] = room["settings"]["time_limit"]
-        broadcast_room(room_id)
-        start_timer(room_id)
+                ct["remaining_time"] = room["settings"]["time_limit"]
+                broadcast_room(room_id)
+                start_timer(room_id)
+        except RoomStoreError:
+            app.logger.exception("Countdown synchronization failed for room %s.", room_id)
 
     socketio.start_background_task(_run)
 
@@ -459,7 +589,7 @@ def remove_player_from_room(room_id: str, player_id: str, reason: str = "removed
 
     # if no players -> delete room
     if len(room.get("players", {})) == 0:
-        ROOMS.pop(room_id, None)
+        delete_room(room_id)
         return True
 
     # host migration
@@ -492,7 +622,22 @@ def remove_player_from_room(room_id: str, player_id: str, reason: str = "removed
 # -----------------------------
 @app.get("/api/health")
 def api_health():
-    return jsonify(catalog_service.healthcheck())
+    health = catalog_service.healthcheck()
+    try:
+        redis_status = "up" if ROOM_STORE.ping() else "disabled"
+    except RoomStoreError:
+        redis_status = "unavailable"
+    redis_ready = redis_status == "up"
+    response = {
+        **health,
+        "ok": bool(health.get("ok")) and (
+            redis_ready or not app.config["REDIS_REQUIRED"]
+        ),
+        "redis": redis_status,
+        "redis_required": app.config["REDIS_REQUIRED"],
+        "shared_rooms": redis_ready,
+    }
+    return jsonify(response), 503 if app.config["REDIS_REQUIRED"] and not redis_ready else 200
 
 @app.get("/api/meta")
 def api_meta():
@@ -535,6 +680,7 @@ def api_words(category):
     return jsonify({"category": cat, "difficulty": difficulty, "count": len(out), "words": out})
 
 @app.post("/api/rooms/<room_id>/kick")
+@synchronized_room_route
 def api_kick(room_id):
     auth_err = require_admin_rest()
     if auth_err:
@@ -577,6 +723,7 @@ def api_kick(room_id):
 
 
 @app.post("/api/rooms/<room_id>/play_again")
+@synchronized_room_route
 def api_play_again(room_id):
     auth_err = require_admin_rest()
     if auth_err:
@@ -820,40 +967,51 @@ def on_disconnect(reason=None):
     if not session:
         return
 
-    room_id = session.get("room_id")
-    player_id = session.get("player_id")
-    room = ensure_room(room_id)
-    if not room:
+    room_id = normalize_room_id(session.get("room_id"))
+    player_id = str(session.get("player_id") or "").strip()
+    if not room_id or not player_id:
         return
+    try:
+        with ROOM_STORE.lock(room_id):
+            room = ensure_room(room_id)
+            if not room:
+                return
 
-    p = room.get("players", {}).get(player_id)
-    if not p:
+            p = room.get("players", {}).get(player_id)
+            if not p:
+                return
+
+            # mark disconnected (do not delete immediately)
+            p["connected"] = False
+            p["sid"] = None
+            broadcast_room(room_id)
+    except RoomStoreError:
+        app.logger.exception("Disconnect synchronization failed for room %s.", room_id)
         return
-
-    # mark disconnected (do not delete immediately)
-    p["connected"] = False
-    p["sid"] = None
-    broadcast_room(room_id)
 
     def cleanup_later():
         socketio.sleep(RECONNECT_GRACE_SECONDS)
-        r = ensure_room(room_id)
-        if not r:
-            return
-        pp = r.get("players", {}).get(player_id)
-        if not pp:
-            return
-        if pp.get("connected") is True:
-            return  # reconnected
+        try:
+            with ROOM_STORE.lock(room_id):
+                r = ensure_room(room_id)
+                if not r:
+                    return
+                pp = r.get("players", {}).get(player_id)
+                if not pp:
+                    return
+                if pp.get("connected") is True:
+                    return  # reconnected
 
-        # if disconnected during active turn -> end turn
-        ct = r.get("current_turn") or {}
-        if r.get("phase") == "playing" and player_id in [ct.get("describer_id"), ct.get("guesser_id")]:
-            end_team_turn(room_id, reason="player_left")
-            return
+                # if disconnected during active turn -> end turn
+                ct = r.get("current_turn") or {}
+                if r.get("phase") == "playing" and player_id in [ct.get("describer_id"), ct.get("guesser_id")]:
+                    end_team_turn(room_id, reason="player_left")
+                    return
 
-        # remove for real
-        remove_player_from_room(room_id, player_id, reason="disconnect_timeout")
+                # remove for real
+                remove_player_from_room(room_id, player_id, reason="disconnect_timeout")
+        except RoomStoreError:
+            app.logger.exception("Disconnect cleanup failed for room %s.", room_id)
 
     socketio.start_background_task(cleanup_later)
 
@@ -870,55 +1028,75 @@ def create_room(data):
     if not player_id:
         player_id = new_player_id()
 
-    # generate 4 digits room code
+    if app.config["REDIS_REQUIRED"] and not ROOM_STORE.enabled:
+        app.logger.error("REDIS_URL is required but is not configured.")
+        emit("error", {"message": "The room service is not configured. Please retry later."})
+        return
+
+    # Generate and atomically reserve a 4-digit room code.
     chars = "0123456789"
-    while True:
+    room_id = ""
+    room = None
+    for _ in range(100):
         room_id = "".join(random.choice(chars) for _ in range(4))
-        if room_id not in ROOMS:
-            break
+        candidate = {
+            "room_id": room_id,
+            "host_id": player_id,
+            "state": "lobby",
+            "phase": "lobby",
+            "settings": dict(DEFAULT_SETTINGS),
+            "target_score": TARGET_SCORE,
+            "last_turn_summary": None,
+            "players": {
+                player_id: {
+                    "id": player_id,
+                    "sid": request.sid,
+                    "name": name,
+                    "connected": True,
+                }
+            },
+            "teams": [],
+            "draft_teams": [],
+            "used_words": {cat: set() for cat in ALL_CATEGORIES},
+            "timer_task": None,
+            "turn_order": None,
+            "turn_index": 0,
+            "current_round": 1,
+            "turn_number": 1,
+            "current_turn": {},
+            "ranking": [],
+            "last_ended_turn_number": 0,
+        }
 
-    ROOMS[room_id] = {
-        "room_id": room_id,
-        "host_id": player_id,  # ✅ host is a player_id now
-        "state": "lobby",
-        "phase": "lobby",
-        "settings": dict(DEFAULT_SETTINGS),
-        "target_score": TARGET_SCORE,
-        "last_turn_summary": None,
+        try:
+            if ROOM_STORE.enabled:
+                if not ROOM_STORE.create(candidate):
+                    continue
+            elif room_exists(room_id):
+                continue
+        except RoomStoreError:
+            app.logger.exception("Unable to create a room in Redis.")
+            emit("error", {"message": "Unable to create a room right now. Please retry."})
+            return
 
-        "players": {},      # keyed by player_id
-        "teams": [],
-        "draft_teams": [],
+        room = candidate
+        ROOMS[room_id] = room
+        break
 
-        "used_words": {cat: set() for cat in ALL_CATEGORIES},
-        "timer_task": None,
-
-        "turn_order": None,
-        "turn_index": 0,
-        "current_round": 1,
-        "turn_number": 1,
-
-        "current_turn": {},
-        "ranking": [],
-        "last_ended_turn_number": 0,
-    }
-
-    room = ROOMS[room_id]
-    room["players"][player_id] = {
-        "id": player_id,
-        "sid": request.sid,
-        "name": name,
-        "connected": True,
-    }
+    if room is None:
+        emit("error", {"message": "Unable to generate an available room code."})
+        return
 
     bind_session(room_id, player_id, request.sid)
     join_room(room_id)
 
     emit("room_joined", {"room_id": room_id, "player_id": player_id})
     broadcast_room(room_id)
+    resume_room_timer(room_id, room)
 
 
 @socketio.on("join_room")
+@synchronized_room_event
 def join_room_event(data):
     room_id = str((data or {}).get("room_id", "")).strip().upper()
     name = str((data or {}).get("name", "")).strip()[:20]
@@ -963,9 +1141,11 @@ def join_room_event(data):
 
     emit("room_joined", {"room_id": room_id, "player_id": player_id})
     broadcast_room(room_id)
+    resume_room_timer(room_id, room)
 
 
 @socketio.on("leave_room")
+@synchronized_room_event
 def leave_room_event(data):
     room_id = str((data or {}).get("room_id", "")).strip().upper()
     room = ensure_room(room_id)
@@ -987,6 +1167,7 @@ def leave_room_event(data):
 
 
 @socketio.on("host_update_draft_teams")
+@synchronized_room_event
 def host_update_draft_teams(data):
     room_id = str((data or {}).get("room_id", "")).strip().upper()
     draft = (data or {}).get("draft_teams", [])
@@ -1029,6 +1210,7 @@ def host_update_draft_teams(data):
 
 
 @socketio.on("host_set_teams")
+@synchronized_room_event
 def host_set_teams(data):
     room_id = str((data or {}).get("room_id", "")).strip().upper()
     teams_data = (data or {}).get("teams", [])
@@ -1084,6 +1266,7 @@ def host_set_teams(data):
 
 
 @socketio.on("host_start_game")
+@synchronized_room_event
 def host_start_game(data):
     room_id = str((data or {}).get("room_id", "")).strip().upper()
     room = ensure_room(room_id)
@@ -1122,6 +1305,7 @@ def host_start_game(data):
 
 
 @socketio.on("describer_start_turn")
+@synchronized_room_event
 def describer_start_turn(data):
     room_id = str((data or {}).get("room_id", "")).strip().upper()
     room = ensure_room(room_id)
@@ -1149,6 +1333,7 @@ def describer_start_turn(data):
 
 
 @socketio.on("choose_category")
+@synchronized_room_event
 def choose_category(data):
     room_id = str((data or {}).get("room_id", "")).strip().upper()
     category = str((data or {}).get("category", "")).strip().lower()
@@ -1190,6 +1375,7 @@ def choose_category(data):
 
 
 @socketio.on("choose_difficulty")
+@synchronized_room_event
 def choose_difficulty(data):
     room_id = str((data or {}).get("room_id", "")).strip().upper()
     difficulty = str((data or {}).get("difficulty", "")).strip().lower()
@@ -1237,6 +1423,7 @@ def choose_difficulty(data):
 
 
 @socketio.on("guess_boxes_typing")
+@synchronized_room_event
 def guess_boxes_typing(data):
     room_id = str((data or {}).get("room_id", "")).strip().upper()
     index = (data or {}).get("index")
@@ -1260,10 +1447,12 @@ def guess_boxes_typing(data):
 
     ct.setdefault("guess_boxes", ["", "", "", "", ""])
     ct["guess_boxes"][index] = text
+    persist_room(room)
     socketio.emit("guess_boxes_update", {"boxes": ct["guess_boxes"]}, room=room_id)
 
 
 @socketio.on("submit_guess_box")
+@synchronized_room_event
 def submit_guess_box(data):
     room_id = str((data or {}).get("room_id", "")).strip().upper()
     index = (data or {}).get("index")
@@ -1336,7 +1525,7 @@ def submit_guess_box(data):
                 ct["word_status"][best_word] = "close"
                 ct["word_claims"][best_word] = index
 
-    mult = points_multiplier(ct.get("difficulty"))
+    mult = points_multiplier(str(ct.get("difficulty") or "medium"))
     points_delta = float(points_delta) * float(mult)
 
     socketio.emit("guess_box_result", {"index": index, "status": status}, room=room_id)
@@ -1356,6 +1545,7 @@ def submit_guess_box(data):
 
 
 @socketio.on("host_kick_player")
+@synchronized_room_event
 def host_kick_player(data):
     room_id = str((data or {}).get("room_id", "")).strip().upper()
     target_player_id = str((data or {}).get("player_id", "")).strip()
@@ -1404,6 +1594,7 @@ def host_kick_player(data):
 
 
 @socketio.on("host_play_again")
+@synchronized_room_event
 def host_play_again(data):
     room_id = str((data or {}).get("room_id", "")).strip().upper()
     room = ensure_room(room_id)
