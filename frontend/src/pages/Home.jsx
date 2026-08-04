@@ -72,50 +72,86 @@ export default function Home() {
   };
 
   return (
-    <Card className="p-6">
-      <div className="text-sm text-zinc-400 mt-1">Guess words in teams of 2.</div>
+    <Card className="mx-auto max-w-lg p-4 sm:p-6">
+      <div className="rounded-2xl bg-indigo-50 px-4 py-4 dark:bg-indigo-500/10">
+        <div className="text-xs font-black uppercase tracking-[0.18em] text-indigo-600 dark:text-indigo-300">
+          Team word game
+        </div>
+        <div className="mt-1 text-2xl font-black tracking-tight">Ready to play?</div>
+        <div className="mt-1 text-sm leading-6 text-zinc-600 dark:text-zinc-400">
+          Guess words with a teammate and race to the top of the ranking.
+        </div>
+      </div>
 
       {/* JOIN FIRST */}
-      <div className="mt-6">
+      <form
+        className="mt-6"
+        onSubmit={(event) => {
+          event.preventDefault();
+          joinRoom();
+        }}
+      >
         <div className="text-lg font-bold">Join a room</div>
         <div className="mt-3 space-y-3">
+          <label className="block text-sm font-medium text-zinc-700 dark:text-zinc-300">
+            Nickname
           <Input
+            className="mt-2"
             placeholder="Your nickname"
             value={joinName}
             onChange={(e) => setJoinName(e.target.value)}
+            autoComplete="nickname"
+            enterKeyHint="next"
           />
+          </label>
+          <label className="block text-sm font-medium text-zinc-700 dark:text-zinc-300">
+            Room code
           <Input
             placeholder="Room code (4 digits)"
             value={joinCode}
             onChange={(e) =>
               setJoinCode(e.target.value.replace(/\D/g, "").slice(0, 4))
             }
+            inputMode="numeric"
+            pattern="[0-9]*"
+            maxLength={4}
+            autoComplete="one-time-code"
+            enterKeyHint="go"
+            className="mt-2 font-mono text-lg tracking-[0.2em]"
           />
-          <Button onClick={joinRoom} className="w-full">
+          </label>
+          <Button type="submit" className="w-full">
             Join
           </Button>
         </div>
-      </div>
+      </form>
 
       {/* CREATE SECOND */}
-      <div className="mt-8 border-t border-zinc-800 pt-6">
+      <form
+        className="mt-7 border-t border-zinc-200 pt-6 dark:border-zinc-800"
+        onSubmit={(event) => {
+          event.preventDefault();
+          createRoom();
+        }}
+      >
         <div className="text-lg font-bold">Create a game</div>
         <div className="mt-3 space-y-3">
+          <label className="block text-sm font-medium text-zinc-700 dark:text-zinc-300">
+            Nickname
           <Input
+            className="mt-2"
             placeholder="Your nickname"
             value={createName}
             onChange={(e) => setCreateName(e.target.value)}
+            autoComplete="nickname"
+            enterKeyHint="go"
           />
-          <Button onClick={createRoom} variant="ghost" className="w-full">
+          </label>
+          <Button type="submit" variant="ghost" className="w-full">
             Create
           </Button>
         </div>
-      </div>
-
-      {/* tiny debug helper (optional, harmless) */}
-      <div className="mt-6 text-xs text-zinc-600">
-        Your player id: <span className="font-mono">{playerId.slice(0, 10)}…</span>
-      </div>
+      </form>
     </Card>
   );
 }

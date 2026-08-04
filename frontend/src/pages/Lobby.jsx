@@ -160,20 +160,20 @@ export default function Lobby({ myId, room, roomId, onLeave }) {
   const rulesText = "40s per turn • First team to reach 50+ wins.";
 
   // styles helpers
-  const dropBase = "rounded-2xl bg-zinc-950 border transition";
-  const dropNormal = "border-zinc-800";
+  const dropBase = "rounded-2xl border bg-zinc-50 transition dark:bg-zinc-950";
+  const dropNormal = "border-zinc-200 dark:border-zinc-800";
   const dropActive = "border-indigo-600/70 ring-2 ring-indigo-600/25";
 
-  const chipWrap = "relative";
+  const chipWrap = "relative mr-1 mt-1 min-w-0";
   const chipBase =
-    "px-4 py-3 rounded-2xl border cursor-pointer active:scale-[0.98] transition select-none";
-  const chipNormal = "border-zinc-800 bg-zinc-900/40";
+    "min-h-12 max-w-full px-4 py-3 rounded-2xl border cursor-pointer active:scale-[0.98] transition select-none text-left";
+  const chipNormal = "border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-900/40";
   const chipAdmin = "border-indigo-700/50 bg-indigo-700/10";
   const chipSelected =
     "border-indigo-500/60 bg-indigo-500/10 ring-2 ring-indigo-500/20";
 
   const kickBtn =
-    "absolute -top-2 -right-2 w-7 h-7 rounded-full border border-zinc-800 bg-zinc-950 text-zinc-300 hover:text-white hover:border-rose-500/40 hover:bg-rose-500/10 flex items-center justify-center text-sm leading-none";
+    "absolute -right-3 -top-3 z-10 flex h-11 w-11 items-center justify-center rounded-full border border-zinc-300 bg-white text-base leading-none text-zinc-600 shadow-sm hover:border-rose-500/40 hover:bg-rose-500/10 hover:text-rose-600 dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-300 dark:hover:text-rose-300";
 
   const selectedHint = isHost
     ? selectedPlayer
@@ -182,18 +182,18 @@ export default function Lobby({ myId, room, roomId, onLeave }) {
     : "Waiting for admin to create teams and start…";
 
   return (
-    <div className="pb-24 sm:pb-0">
+    <div className="pb-28 sm:pb-0">
       <Card className="p-4 sm:p-6">
         {/* Header */}
         <div className="flex items-start justify-between gap-3">
           <div className="min-w-0">
-            <div className="text-2xl font-black">Lobby</div>
+            <div className="text-xl font-black sm:text-2xl">Lobby</div>
 
             {/* Room code hero (no COPY button now) */}
             <div className="mt-3 flex items-center gap-3">
               <div className="min-w-0">
-                <div className="text-xs text-zinc-500">ROOM CODE</div>
-                <div className="font-mono text-3xl sm:text-4xl font-black tracking-[0.35em] text-zinc-100">
+                <div className="text-xs font-bold tracking-wider text-zinc-500">ROOM CODE</div>
+                <div className="max-w-full font-mono text-3xl font-black tracking-[0.22em] text-zinc-950 dark:text-zinc-100 sm:text-4xl sm:tracking-[0.35em]">
                   {roomId}
                 </div>
               </div>
@@ -201,7 +201,7 @@ export default function Lobby({ myId, room, roomId, onLeave }) {
 
             <div className="mt-2 text-xs text-zinc-500">{rulesText}</div>
 
-            <div className={`mt-3 text-sm ${isHost ? "text-zinc-300" : "text-zinc-400"}`}>
+            <div className={`mt-3 text-sm leading-5 ${isHost ? "text-zinc-700 dark:text-zinc-300" : "text-zinc-600 dark:text-zinc-400"}`}>
               <b>{selectedHint}</b>
             </div>
           </div>
@@ -214,7 +214,7 @@ export default function Lobby({ myId, room, roomId, onLeave }) {
 
         {/* Unassigned */}
         <div className="mt-6">
-          <div className="text-sm text-zinc-400 mb-2">Unassigned players</div>
+          <div className="mb-2 text-sm font-medium text-zinc-600 dark:text-zinc-400">Unassigned players</div>
 
           <div
             className={`${dropBase} p-4 min-h-[88px] ${
@@ -228,7 +228,7 @@ export default function Lobby({ myId, room, roomId, onLeave }) {
           >
             <div className="flex flex-wrap gap-2">
               {unassignedPlayers.length === 0 ? (
-                <Badge className="text-zinc-400">All assigned ✅</Badge>
+                <Badge className="text-zinc-600 dark:text-zinc-400">All assigned ✅</Badge>
               ) : (
                 unassignedPlayers.map((p) => {
                   const isSelected = selectedPlayerId === p.id;
@@ -236,7 +236,8 @@ export default function Lobby({ myId, room, roomId, onLeave }) {
 
                   return (
                     <div key={p.id} className={chipWrap}>
-                      <div
+                      <button
+                        type="button"
                         onClick={(e) => {
                           e.stopPropagation();
                           selectPlayer(p.id);
@@ -247,7 +248,7 @@ export default function Lobby({ myId, room, roomId, onLeave }) {
                         ].join(" ")}
                       >
                         <div className="flex items-center gap-2">
-                          <span className="font-semibold text-base">{p.name}</span>
+                          <span className="min-w-0 truncate text-base font-semibold">{p.name}</span>
                           {isAdmin && <Badge>ADMIN</Badge>}
                           {p.id === myId && (
                             <Badge className="bg-indigo-700/40 border-indigo-700">
@@ -255,7 +256,7 @@ export default function Lobby({ myId, room, roomId, onLeave }) {
                             </Badge>
                           )}
                         </div>
-                      </div>
+                      </button>
 
                       {/* ✅ Kick button (admin only, cannot kick self) */}
                       {isHost && p.id !== myId && (
@@ -287,7 +288,7 @@ export default function Lobby({ myId, room, roomId, onLeave }) {
 
         {/* Teams */}
         <div className="mt-6">
-          <div className="text-sm text-zinc-400 mb-2">Teams</div>
+          <div className="mb-2 text-sm font-medium text-zinc-600 dark:text-zinc-400">Teams</div>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             {draftTeams.map((t, idx) => {
@@ -331,7 +332,8 @@ export default function Lobby({ myId, room, roomId, onLeave }) {
 
                         return (
                           <div key={pid} className={chipWrap}>
-                            <div
+                            <button
+                              type="button"
                               onClick={(e) => {
                                 e.stopPropagation();
                                 selectPlayer(pid);
@@ -344,7 +346,7 @@ export default function Lobby({ myId, room, roomId, onLeave }) {
                               <span className="font-semibold text-base">
                                 {p?.name || pid.slice(0, 6)}
                               </span>
-                            </div>
+                            </button>
 
                             {/* ✅ Kick button (admin only, cannot kick self) */}
                             {isHost && pid !== myId && (
@@ -389,8 +391,8 @@ export default function Lobby({ myId, room, roomId, onLeave }) {
 
       {/* Sticky bottom bar (mobile) */}
       {isHost && (
-        <div className="fixed bottom-0 left-0 right-0 p-3 sm:hidden">
-          <div className="mx-auto max-w-xl rounded-2xl border border-zinc-800 bg-zinc-950/90 backdrop-blur px-3 py-3">
+        <div className="safe-bottom fixed bottom-0 left-0 right-0 z-40 px-3 pt-3 sm:hidden">
+          <div className="mx-auto max-w-xl rounded-2xl border border-zinc-200 bg-white/90 px-3 py-3 shadow-xl backdrop-blur dark:border-zinc-800 dark:bg-zinc-950/90">
             <Button className="w-full" onClick={startGame} disabled={!canStart}>
               Start game
             </Button>

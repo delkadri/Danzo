@@ -7,8 +7,16 @@ import Game from "./pages/Game";
 
 import { Card } from "./components/Card";
 import { Button } from "./components/Button";
+import { ThemeToggle } from "./components/ThemeToggle";
+
+function getInitialTheme() {
+  const savedTheme = localStorage.getItem("danzo_theme");
+  if (savedTheme === "light" || savedTheme === "dark") return savedTheme;
+  return window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+}
 
 export default function App() {
+  const [theme, setTheme] = useState(getInitialTheme);
   const [myId, setMyId] = useState(null);
   const [roomId, setRoomId] = useState(null);
   const [room, setRoom] = useState(null);
@@ -16,6 +24,17 @@ export default function App() {
 
   // ✅ small modern banner message (ex: kicked)
   const [systemMsg, setSystemMsg] = useState("");
+
+  useEffect(() => {
+    const isDark = theme === "dark";
+    document.documentElement.classList.toggle("dark", isDark);
+    document.documentElement.style.colorScheme = theme;
+    document.querySelector('meta[name="theme-color"]')?.setAttribute(
+      "content",
+      isDark ? "#09090b" : "#f8fafc"
+    );
+    localStorage.setItem("danzo_theme", theme);
+  }, [theme]);
 
   const clearSessionStorage = () => {
     localStorage.removeItem("danzo_room_id");
@@ -147,10 +166,10 @@ export default function App() {
   // loading safe
   if (view !== "home" && (!roomId || !room)) {
     return (
-      <div className="min-h-screen flex items-center justify-center p-6">
-        <Card className="p-6 max-w-md w-full">
+      <div className="safe-top safe-bottom flex min-h-[100dvh] items-center justify-center p-4">
+        <Card className="w-full max-w-md p-5 sm:p-6">
           <div className="text-xl font-bold">Loading room…</div>
-          <div className="text-sm text-zinc-400 mt-2">
+          <div className="mt-2 text-sm text-zinc-600 dark:text-zinc-400">
             Waiting for server state…
           </div>
           <div className="mt-4">
@@ -164,27 +183,33 @@ export default function App() {
   }
 
   return (
-    <div className="min-h-screen p-4 sm:p-6 max-w-6xl mx-auto">
+    <div className="safe-top safe-bottom mx-auto min-h-[100dvh] w-full max-w-5xl px-3 pb-6 sm:px-6 sm:pb-8">
       {/* HEADER */}
-      <div className="mb-5 flex items-center justify-between">
-        <div>
-          <div className="text-2xl font-black">Play Danzo</div>
-          <div className="text-sm text-zinc-400">
-            {roomId ? `Room: ${roomId}` : ""}
-          </div>
+      <header className="mb-4 flex min-h-14 items-center justify-between gap-3 sm:mb-5">
+        <div className="min-w-0">
+          <div className="truncate text-xl font-black tracking-tight sm:text-2xl">Play Danzo</div>
+          {roomId && (
+            <div className="mt-0.5 truncate text-xs font-medium text-zinc-500 dark:text-zinc-400 sm:text-sm">
+              Room <span className="font-mono font-bold tracking-wider">{roomId}</span>
+            </div>
+          )}
         </div>
-      </div>
+        <ThemeToggle
+          theme={theme}
+          onToggle={() => setTheme((current) => (current === "dark" ? "light" : "dark"))}
+        />
+      </header>
 
       {/* ✅ System banner (kicked, etc.) */}
       {systemMsg && (
-        <div className="mb-4 rounded-2xl border border-rose-500/30 bg-rose-500/10 px-4 py-3 text-sm text-zinc-200 flex items-start justify-between gap-3">
+        <div className="mb-4 flex items-start justify-between gap-3 rounded-2xl border border-rose-500/30 bg-rose-500/10 px-4 py-3 text-sm text-zinc-800 dark:text-zinc-200">
           <div className="min-w-0">
             <div className="font-bold">Removed from the room</div>
-            <div className="text-zinc-300">{systemMsg}</div>
+            <div className="text-zinc-600 dark:text-zinc-300">{systemMsg}</div>
           </div>
           <button
             onClick={() => setSystemMsg("")}
-            className="shrink-0 rounded-xl border border-zinc-800 bg-zinc-950 px-3 py-1 text-xs text-zinc-200 hover:border-zinc-700"
+            className="min-h-11 shrink-0 rounded-xl border border-zinc-300 bg-white px-3 text-xs font-semibold text-zinc-700 hover:border-zinc-400 dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-200 dark:hover:border-zinc-700"
           >
             OK
           </button>

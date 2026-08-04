@@ -22,8 +22,8 @@ function boxClass(box, isGuesser) {
     return "border-rose-500/30 bg-rose-500/5";
 
   return isGuesser
-    ? "border-zinc-800 bg-zinc-950 focus-within:border-indigo-500/50 focus-within:ring-2 focus-within:ring-indigo-500/15"
-    : "border-zinc-800 bg-zinc-950";
+    ? "border-zinc-200 bg-white focus-within:border-indigo-500/50 focus-within:ring-2 focus-within:ring-indigo-500/15 dark:border-zinc-800 dark:bg-zinc-950"
+    : "border-zinc-200 bg-zinc-50 dark:border-zinc-800 dark:bg-zinc-950";
 }
 function formatPts(n) {
   // show 0.5 cleanly, no trailing .0
@@ -299,11 +299,11 @@ export default function Game({ myId, room, roomId, onLeave }) {
 
   return (
     <div className="grid gap-4">
-      <Card className="p-6">
+      <Card className="p-4 sm:p-6">
         <div className="flex items-center justify-between">
           <div>
             <div className="text-xl font-bold">Game</div>
-            <div className="text-sm text-zinc-400">
+            <div className="text-sm text-zinc-600 dark:text-zinc-400">
               Round {ct.round || 1} — Turn {ct.turn_number || 1}
             </div>
           </div>
@@ -313,44 +313,54 @@ export default function Game({ myId, room, roomId, onLeave }) {
           </Button>
         </div>
 
-        <div className="mt-5 flex items-center justify-between">
-          <div className="flex flex-wrap gap-2 items-center">
-            <Badge>Describer</Badge>
-            <span className="font-semibold">{describerName}</span>
-            {isDescriber && <Badge className="bg-indigo-700/40 border-indigo-700">YOU</Badge>}
-
-            <Badge>Guesser</Badge>
-            <span className="font-semibold">{guesserName}</span>
-            {isGuesser && <Badge className="bg-indigo-700/40 border-indigo-700">YOU</Badge>}
-
-            {chosenCategory && (
-              <Badge className="border-zinc-700 bg-zinc-900/40">
-                {categoryLabel(chosenCategory)}
-              </Badge>
-            )}
-
-            {difficulty && (
-              <Badge className="border-indigo-700/50 bg-indigo-700/10">
-                {diffLabel(difficulty)} ×{diffMult(difficulty)}
-              </Badge>
-            )}
+        <div className="mt-4 grid grid-cols-2 gap-2">
+          <div className="min-w-0 rounded-xl border border-zinc-200 bg-zinc-50 p-3 dark:border-zinc-800 dark:bg-zinc-950">
+            <div className="text-[11px] font-bold uppercase tracking-wider text-zinc-500">Describer</div>
+            <div className="mt-1 flex min-w-0 items-center gap-2">
+              <span className="min-w-0 truncate text-sm font-semibold sm:text-base">{describerName}</span>
+              {isDescriber && <Badge className="shrink-0 border-indigo-700 bg-indigo-700/20">YOU</Badge>}
+            </div>
+          </div>
+          <div className="min-w-0 rounded-xl border border-zinc-200 bg-zinc-50 p-3 dark:border-zinc-800 dark:bg-zinc-950">
+            <div className="text-[11px] font-bold uppercase tracking-wider text-zinc-500">Guesser</div>
+            <div className="mt-1 flex min-w-0 items-center gap-2">
+              <span className="min-w-0 truncate text-sm font-semibold sm:text-base">{guesserName}</span>
+              {isGuesser && <Badge className="shrink-0 border-indigo-700 bg-indigo-700/20">YOU</Badge>}
+            </div>
           </div>
 
-          {roundActive && typeof remaining === "number" && (
-            <div className="text-lg font-black">⏱ {remaining}s</div>
+          {(chosenCategory || difficulty) && (
+            <div className="col-span-2 flex flex-wrap gap-2 pt-1">
+              {chosenCategory && <Badge>{categoryLabel(chosenCategory)}</Badge>}
+              {difficulty && (
+                <Badge className="border-indigo-600/40 bg-indigo-500/10 text-indigo-700 dark:text-indigo-200">
+                  {diffLabel(difficulty)} ×{diffMult(difficulty)}
+                </Badge>
+              )}
+            </div>
           )}
         </div>
 
+        {roundActive && typeof remaining === "number" && (
+          <div
+            className="sticky top-2 z-30 mt-3 flex items-center justify-between rounded-2xl bg-indigo-600 px-4 py-3 text-white shadow-lg shadow-indigo-950/20 sm:static"
+            aria-live="polite"
+          >
+            <span className="text-sm font-semibold">Time remaining</span>
+            <span className="text-xl font-black tabular-nums">{remaining}s</span>
+          </div>
+        )}
+
         {(phase === "ranking" || phase === "results") && (
           <>
-            <Card className="p-5 mt-5">
+            <Card className="mt-5 p-4 sm:p-5">
               <div className="text-xl font-black mb-2">
                 {phase === "results" ? "Final Ranking" : "Ranking"}
               </div>
 
               <div className="space-y-2">
                 {ranking.length === 0 ? (
-                  <div className="text-sm text-zinc-400">Waiting for teams…</div>
+                  <div className="text-sm text-zinc-600 dark:text-zinc-400">Waiting for teams…</div>
                 ) : (
                   ranking.map((r, idx) => {
                     const p1 = r?.players?.[0];
@@ -361,18 +371,18 @@ export default function Game({ myId, room, roomId, onLeave }) {
                     return (
                       <div
                         key={r.team_id}
-                        className="p-3 rounded-xl bg-zinc-950 border border-zinc-800 flex justify-between"
+                        className="flex min-w-0 justify-between gap-3 rounded-xl border border-zinc-200 bg-zinc-50 p-3 dark:border-zinc-800 dark:bg-zinc-950"
                       >
-                        <div className="flex gap-2 items-center">
+                        <div className="flex min-w-0 items-center gap-2">
                           <Badge>#{idx + 1}</Badge>
                           <div className="flex flex-col">
-                            <span className="text-sm text-zinc-300 font-semibold">
+                            <span className="break-words text-sm font-semibold text-zinc-700 dark:text-zinc-300">
                               Team {r.team_id + 1}: {names}
                             </span>
                             <span className="text-xs text-zinc-500">Score</span>
                           </div>
                         </div>
-                        <span className="font-black">{r.score}</span>
+                        <span className="shrink-0 font-black tabular-nums">{r.score}</span>
                       </div>
                     );
                   })
@@ -388,7 +398,7 @@ export default function Game({ myId, room, roomId, onLeave }) {
               )}
 
               {phase !== "results" && !isDescriber && (
-                <div className="mt-4 text-sm text-zinc-400">
+                <div className="mt-4 text-sm text-zinc-600 dark:text-zinc-400">
                   Waiting for <b>{describerName}</b> to press <b>Start Turn</b>…
                 </div>
               )}
@@ -403,21 +413,21 @@ export default function Game({ myId, room, roomId, onLeave }) {
             </Card>
 
             {phase === "ranking" && lastTurnWords.length > 0 && (
-              <Card className="p-5 mt-4">
+              <Card className="mt-4 p-4 sm:p-5">
                 <div className="flex items-center justify-between">
                   <div className="text-lg font-black">Words</div>
                   {typeof lastTurnPoints === "number" && (
-                    <div className="text-sm text-zinc-300">
-                      Points: <b className="text-zinc-100">{lastTurnPoints}</b>
+                    <div className="text-sm text-zinc-700 dark:text-zinc-300">
+                      Points: <b className="text-zinc-950 dark:text-zinc-100">{lastTurnPoints}</b>
                     </div>
                   )}
                 </div>
 
-                <div className="mt-3 grid md:grid-cols-2 gap-2">
+                <div className="mt-3 grid grid-cols-2 gap-2">
                   {lastTurnWords.map((w) => (
                     <div
                       key={w}
-                      className="p-3 rounded-xl border border-zinc-800 bg-zinc-950"
+                      className="rounded-xl border border-zinc-200 bg-zinc-50 p-3 dark:border-zinc-800 dark:bg-zinc-950"
                     >
                       <div className="font-semibold">{w}</div>
                     </div>
@@ -431,23 +441,23 @@ export default function Game({ myId, room, roomId, onLeave }) {
         {phase === "playing" && (
           <div className="mt-5 grid gap-4">
             {showTurnControl && (
-              <Card className="p-5">
+              <Card className="p-4 sm:p-5">
                 <div className="font-bold mb-2">Turn Control</div>
 
-                {!turnStarted && isDescriber && <Button onClick={startTurn}>Start Turn</Button>}
+                {!turnStarted && isDescriber && <Button className="w-full" onClick={startTurn}>Start Turn</Button>}
 
                 {!turnStarted && !isDescriber && (
-                  <div className="text-sm text-zinc-400">
+                  <div className="text-sm text-zinc-600 dark:text-zinc-400">
                     Waiting for <b>{describerName}</b> to press <b>Start Turn</b>…
                   </div>
                 )}
 
                 {turnStarted && !chosenCategory && isDescriber && (
                   <div className="mt-4">
-                    <div className="text-sm text-zinc-400 mb-2">Pick a category (1 out of 2)</div>
-                    <div className="flex flex-wrap gap-2">
+                    <div className="mb-2 text-sm text-zinc-600 dark:text-zinc-400">Pick a category (1 out of 2)</div>
+                    <div className="grid gap-2 sm:grid-cols-2">
                       {categoryOptions.map((cat) => (
-                        <Button key={cat} onClick={() => chooseCategory(cat)}>
+                        <Button className="w-full" key={cat} onClick={() => chooseCategory(cat)}>
                           {categoryLabel(cat)}
                         </Button>
                       ))}
@@ -456,7 +466,7 @@ export default function Game({ myId, room, roomId, onLeave }) {
                 )}
 
                 {turnStarted && !chosenCategory && !isDescriber && (
-                  <div className="mt-4 text-sm text-zinc-400">
+                  <div className="mt-4 text-sm text-zinc-600 dark:text-zinc-400">
                     Waiting for <b>{describerName}</b> to choose category…
                   </div>
                 )}
@@ -464,14 +474,14 @@ export default function Game({ myId, room, roomId, onLeave }) {
                 {/* ✅ NEW: choose difficulty after category */}
                 {turnStarted && chosenCategory && !difficulty && isDescriber && (
                   <div className="mt-5">
-                    <div className="text-sm text-zinc-400 mb-2">
+                    <div className="mb-2 text-sm text-zinc-600 dark:text-zinc-400">
                       Choose difficulty
                     </div>
                     <div className="grid gap-2 sm:grid-cols-3">
                       {DIFFS.map((d) => (
-                        <Button key={d.key} onClick={() => chooseDifficulty(d.key)}>
+                        <Button className="w-full" key={d.key} onClick={() => chooseDifficulty(d.key)}>
                           <span className="font-bold">{d.label}</span>
-                          <span className="ml-2 text-xs text-zinc-300">({d.hint})</span>
+                          <span className="ml-2 text-xs text-indigo-100">({d.hint})</span>
                         </Button>
                       ))}
                     </div>
@@ -479,7 +489,7 @@ export default function Game({ myId, room, roomId, onLeave }) {
                 )}
 
                 {turnStarted && chosenCategory && !difficulty && !isDescriber && (
-                  <div className="mt-4 text-sm text-zinc-400">
+                  <div className="mt-4 text-sm text-zinc-600 dark:text-zinc-400">
                     Waiting for <b>{describerName}</b> to choose difficulty…
                   </div>
                 )}
@@ -487,8 +497,8 @@ export default function Game({ myId, room, roomId, onLeave }) {
             )}
 
             {inCountdown && (
-              <Card className="p-6 text-center">
-                <div className="text-sm text-zinc-400">Starting</div>
+              <Card className="p-5 text-center sm:p-6">
+                <div className="text-sm text-zinc-600 dark:text-zinc-400">Starting</div>
                 <div className="text-2xl font-black mt-1">
                   {countdownCat ? categoryLabel(countdownCat) : "—"}
                 </div>
@@ -502,14 +512,14 @@ export default function Game({ myId, room, roomId, onLeave }) {
             )}
 
             {roundActive && !isGuesser && words && words.length > 0 && (
-              <Card className="p-5">
+              <Card className="p-4 sm:p-5">
                 <div className="font-bold mb-3">Words (visible to spectators + describer)</div>
 
-                <div className="grid md:grid-cols-2 gap-2">
+                <div className="grid grid-cols-2 gap-2">
                   {words.map((w) => (
                     <div
                       key={w}
-                      className="p-3 rounded-xl border border-zinc-800 bg-zinc-950"
+                      className="rounded-xl border border-zinc-200 bg-zinc-50 p-3 dark:border-zinc-800 dark:bg-zinc-950"
                     >
                       <div className="font-semibold">{w}</div>
                     </div>
@@ -519,7 +529,7 @@ export default function Game({ myId, room, roomId, onLeave }) {
             )}
 
             {roundActive && (
-              <Card className="p-5">
+              <Card className="p-4 sm:p-5">
                 <div className="flex items-center justify-between">
                   <div className="font-bold">Guesser</div>
                   <div className="text-xs text-zinc-500">
@@ -527,11 +537,11 @@ export default function Game({ myId, room, roomId, onLeave }) {
                   </div>
                 </div>
 
-                <div className="mt-4 grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-2 sm:gap-3">
                   {boxes.map((b, idx) => (
                     <div
                       key={idx}
-                      className={`p-4 rounded-2xl border transition ${boxClass(b, isGuesser)}`}
+                      className={`rounded-2xl border p-3 transition sm:p-4 ${boxClass(b, isGuesser)}`}
                       onClick={() => {
                         if (!isGuesser) return;
                         inputRefs.current[idx]?.focus?.();
@@ -556,7 +566,7 @@ export default function Game({ myId, room, roomId, onLeave }) {
                       {isGuesser ? (
                         <input
                           ref={(el) => (inputRefs.current[idx] = el)}
-                          className="mt-2 w-full bg-transparent outline-none text-base sm:text-lg font-semibold placeholder:text-zinc-700"
+                          className="mt-1 min-h-11 w-full bg-transparent text-base font-semibold outline-none placeholder:text-zinc-400 dark:placeholder:text-zinc-700 sm:mt-2 sm:text-lg"
                           placeholder="Type here…"
                           value={b.text}
                           onChange={(e) => updateBoxText(idx, e.target.value)}
@@ -567,8 +577,8 @@ export default function Game({ myId, room, roomId, onLeave }) {
                           inputMode="text"
                         />
                       ) : (
-                        <div className="mt-2 text-base sm:text-lg font-semibold text-zinc-200 min-h-[28px]">
-                          {b.text ? b.text : <span className="text-zinc-700">…</span>}
+                        <div className="mt-2 min-h-[28px] text-base font-semibold text-zinc-800 dark:text-zinc-200 sm:text-lg">
+                          {b.text ? b.text : <span className="text-zinc-400 dark:text-zinc-700">…</span>}
                         </div>
                       )}
 
@@ -583,7 +593,7 @@ export default function Game({ myId, room, roomId, onLeave }) {
                   ))}
                 </div>
 
-                <div className="mt-3 text-xs text-zinc-500">
+                <div className="mt-3 text-xs leading-5 text-zinc-500">
                   ✅ Exact = green (+2) • 1–2 typos = yellow (+1) — Difficulty multiplier applies
                 </div>
               </Card>

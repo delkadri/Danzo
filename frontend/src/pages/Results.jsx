@@ -14,21 +14,21 @@ export default function Results({ myId, room, roomId, onLeave }) {
 
   return (
     <div className="grid gap-4">
-      <Card className="p-6">
+      <Card className="p-4 sm:p-6">
         <div className="text-2xl font-black">Game Over</div>
-        <div className="text-sm text-zinc-400">
-          Room <span className="font-mono text-zinc-200">{roomId}</span>
+        <div className="text-sm text-zinc-600 dark:text-zinc-400">
+          Room <span className="font-mono text-zinc-800 dark:text-zinc-200">{roomId}</span>
         </div>
 
         <div className="mt-6 text-xl font-bold">Final scores</div>
 
         {room?.settings?.mode === "TEAM" ? (
           <div className="mt-4 grid md:grid-cols-2 gap-3">
-            <div className="p-4 rounded-2xl bg-zinc-950 border border-zinc-800 flex justify-between">
+            <div className="flex justify-between rounded-2xl border border-zinc-200 bg-zinc-50 p-4 dark:border-zinc-800 dark:bg-zinc-950">
               <span className="font-semibold">Team A</span>
               <span className="font-black">{scores.A || 0}</span>
             </div>
-            <div className="p-4 rounded-2xl bg-zinc-950 border border-zinc-800 flex justify-between">
+            <div className="flex justify-between rounded-2xl border border-zinc-200 bg-zinc-50 p-4 dark:border-zinc-800 dark:bg-zinc-950">
               <span className="font-semibold">Team B</span>
               <span className="font-black">{scores.B || 0}</span>
             </div>
@@ -41,7 +41,7 @@ export default function Results({ myId, room, roomId, onLeave }) {
               .map((p, idx) => (
                 <div
                   key={p.id}
-                  className="p-4 rounded-2xl bg-zinc-950 border border-zinc-800 flex items-center justify-between"
+                  className="flex items-center justify-between rounded-2xl border border-zinc-200 bg-zinc-50 p-4 dark:border-zinc-800 dark:bg-zinc-950"
                 >
                   <div className="flex items-center gap-2">
                     <span className="font-semibold">
@@ -55,9 +55,9 @@ export default function Results({ myId, room, roomId, onLeave }) {
           </div>
         )}
 
-        <div className="mt-6 flex gap-2">
-          <Button onClick={restart}>Back to Home</Button>
-          <Button variant="danger" onClick={onLeave}>
+        <div className="mt-6 grid gap-2 sm:grid-cols-2">
+          <Button className="w-full" onClick={restart}>Back to Home</Button>
+          <Button className="w-full" variant="danger" onClick={onLeave}>
             Leave room
           </Button>
         </div>
