@@ -31,17 +31,18 @@ class RoomStore:
     ):
         self.ttl_seconds = max(int(ttl_seconds), 300)
         self.key_prefix = key_prefix.strip(":") or "danzo:local"
-        self.client = (
-            Redis.from_url(
+        self.configuration_error: str | None = None
+        try:
+            self.client = Redis.from_url(
                 redis_url,
                 decode_responses=True,
                 socket_connect_timeout=3,
                 socket_timeout=3,
                 health_check_interval=30,
-            )
-            if redis_url
-            else None
-        )
+            ) if redis_url else None
+        except (TypeError, ValueError) as exc:
+            self.client = None
+            self.configuration_error = str(exc)
 
     @property
     def enabled(self) -> bool:

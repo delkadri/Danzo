@@ -623,10 +623,13 @@ def remove_player_from_room(room_id: str, player_id: str, reason: str = "removed
 @app.get("/api/health")
 def api_health():
     health = catalog_service.healthcheck()
-    try:
-        redis_status = "up" if ROOM_STORE.ping() else "disabled"
-    except RoomStoreError:
-        redis_status = "unavailable"
+    if not app.config["REDIS_URL_VALID"]:
+        redis_status = "invalid_configuration"
+    else:
+        try:
+            redis_status = "up" if ROOM_STORE.ping() else "disabled"
+        except RoomStoreError:
+            redis_status = "unavailable"
     redis_ready = redis_status == "up"
     response = {
         **health,

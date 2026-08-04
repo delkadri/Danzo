@@ -1,4 +1,32 @@
 import os
+import re
+from urllib.parse import urlsplit
+
+
+def normalize_redis_url(value: str) -> str:
+    """Accept a Redis URL or the command copied from the Upstash console."""
+    raw = str(value or "").strip().strip('"').strip("'")
+    if not raw:
+        return ""
+
+    uses_tls = "--tls" in raw
+    match = re.search(r"rediss?://[^\s\"']+", raw)
+    if not match:
+        return ""
+
+    url = match.group(0)
+    if (uses_tls or ".upstash.io" in url.lower()) and url.startswith("redis://"):
+        url = f"rediss://{url[len('redis://') :]}"
+
+    try:
+        parsed = urlsplit(url)
+        if parsed.scheme not in {"redis", "rediss"} or not parsed.hostname:
+            return ""
+        # Accessing port validates that it is a valid integer when provided.
+        _ = parsed.port
+    except ValueError:
+        return ""
+    return url
 
 
 def get_database_url() -> str:
@@ -21,7 +49,9 @@ class Config:
     CORS_ORIGIN = os.getenv("CORS_ORIGIN", "*")
     REST_ADMIN_TOKEN = os.getenv("REST_ADMIN_TOKEN", "")
     RECONNECT_GRACE_SECONDS = int(os.getenv("RECONNECT_GRACE_SECONDS", "45"))
-    REDIS_URL = os.getenv("REDIS_URL", "").strip()
+    REDIS_URL_CONFIGURED = bool(os.getenv("REDIS_URL", "").strip())
+    REDIS_URL = normalize_redis_url(os.getenv("REDIS_URL", ""))
+    REDIS_URL_VALID = bool(REDIS_URL) or not REDIS_URL_CONFIGURED
     REDIS_REQUIRED = os.getenv(
         "REDIS_REQUIRED",
         "true" if os.getenv("VERCEL") else "false",

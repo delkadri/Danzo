@@ -91,6 +91,11 @@ qui ne serait conserve que dans la memoire temporaire d'une instance Vercel.
 Apres le deploiement, `GET /api/health` doit afficher `redis: "up"` et
 `shared_rooms: true`.
 
+Dans Vercel, la valeur de `REDIS_URL` doit normalement commencer par
+`rediss://`. Ne pas inclure `redis-cli --tls -u` dans la variable. Le backend
+accepte toutefois aussi la commande complete copiee depuis Upstash et en extrait
+automatiquement l'URL TLS.
+
 `DATABASE_URL` est facultative : sans base disponible, le jeu utilise
 automatiquement `backend/data/words.json`. Pour utiliser PostgreSQL, ajouter
 une URL hebergee (`postgresql://...`) et conserver `DB_INIT_ON_STARTUP=false`
