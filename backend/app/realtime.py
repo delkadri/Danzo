@@ -328,10 +328,6 @@ def room_public_state(room: Dict[str, Any]) -> Dict[str, Any]:
         "turn_number": current.get("turn_number"),
         "turn_started": current.get("turn_started", False),
     }
-    if current.get("special_bonus_text"):
-        safe_turn["special_bonus_text"] = current["special_bonus_text"]
-        safe_turn["special_bonus_points"] = current.get("special_bonus_points", 0)
-
     teams_safe = []
     for t in room.get("teams", []):
         teams_safe.append({
@@ -495,8 +491,6 @@ def prepare_next_turn(room: Dict[str, Any]) -> None:
         "word_claims": {},
         "guess_boxes": ["", "", "", "", ""],
         "guess_box_revisions": [0, 0, 0, 0, 0],
-        "special_bonus_text": None,
-        "special_bonus_points": 0.0,
         "_special_bonus_awarded": False,
         "countdown_deadline_at": None,
     }
@@ -528,9 +522,6 @@ def end_team_turn(room_id: str, reason: str) -> None:
         "word_status": dict(ct.get("word_status") or {}),
         "points": float(ct.get("turn_points") or 0),
     }
-    if ct.get("special_bonus_text"):
-        last_turn_summary["special_bonus_text"] = ct["special_bonus_text"]
-        last_turn_summary["special_bonus_points"] = float(ct.get("special_bonus_points") or 0)
     room["last_turn_summary"] = last_turn_summary
 
     room["phase"] = "ranking"
@@ -1447,8 +1438,6 @@ def choose_category(data):
     ct["found_words"] = []
     ct["guess_boxes"] = ["", "", "", "", ""]
     ct["guess_box_revisions"] = [0, 0, 0, 0, 0]
-    ct["special_bonus_text"] = None
-    ct["special_bonus_points"] = 0.0
     ct["turn_points"] = 0.0
     ct["countdown_deadline_at"] = None
     ct["remaining_time"] = None
@@ -1497,8 +1486,6 @@ def choose_difficulty(data):
     ct["found_words"] = []
     ct["guess_boxes"] = ["", "", "", "", ""]
     ct["guess_box_revisions"] = [0, 0, 0, 0, 0]
-    ct["special_bonus_text"] = None
-    ct["special_bonus_points"] = 0.0
     ct["turn_points"] = 0.0
     ct["countdown_deadline_at"] = time.time() + 3
     ct["remaining_time"] = None
@@ -1514,9 +1501,6 @@ def choose_difficulty(data):
 def guess_boxes_typing(data):
     room_id = str((data or {}).get("room_id", "")).strip().upper()
     index = (data or {}).get("index")
-    text = str((data or {}).get("text", ""))[:60]
-    revision = (data or {}).get("revision")
-
     room = ensure_room(room_id)
     if not room or room.get("phase") != "playing":
         return
@@ -1536,27 +1520,10 @@ def guess_boxes_typing(data):
     if not isinstance(index, int) or index < 0 or index > 4:
         return
 
-    ct.setdefault("guess_boxes", ["", "", "", "", ""])
-    revisions = ct.get("guess_box_revisions")
-    if not isinstance(revisions, list) or len(revisions) != 5:
-        revisions = [0, 0, 0, 0, 0]
-        ct["guess_box_revisions"] = revisions
-    current_revision = revisions[index]
-    if not isinstance(current_revision, int):
-        current_revision = 0
-    if not isinstance(revision, int):
-        revision = current_revision + 1
-    if revision < current_revision:
-        return
-
-    revisions[index] = revision
-    ct["guess_boxes"][index] = text
-    persist_room(room)
-    socketio.emit(
-        "guess_boxes_update",
-        {"boxes": ct["guess_boxes"], "revisions": revisions},
-        room=room_id,
-    )
+    # Draft text stays on the guesser's device. It is published only after a
+    # normal submission has been checked, so a secret submission cannot leak
+    # through the live-typing channel.
+    return
 
 
 @socketio.on("submit_guess_box")
@@ -1604,24 +1571,19 @@ def submit_guess_box(data):
     if revision < current_revision:
         return
 
-    revisions[index] = revision
-    ct["guess_boxes"][index] = raw_guess
-    persist_room(room)
-
-    if not guess:
-        socketio.emit(
-            "guess_box_result",
-            {"index": index, "status": "", "revision": revision},
-            room=room_id,
-        )
-        return
-
     norm_guess = normalize_text(guess)
 
     if is_secret_bonus_guess(norm_guess):
+        revisions[index] = revision
         already_awarded = bool(ct.get("_special_bonus_awarded"))
         ct["guess_boxes"][index] = ""
         if already_awarded:
+            persist_room(room)
+            socketio.emit(
+                "guess_boxes_update",
+                {"boxes": ct["guess_boxes"], "revisions": revisions},
+                room=room_id,
+            )
             socketio.emit(
                 "guess_box_result",
                 {
@@ -1630,9 +1592,8 @@ def submit_guess_box(data):
                     "revision": revision,
                     "clear": True,
                 },
-                room=room_id,
+                to=request.sid,
             )
-            persist_room(room)
             return
 
         team_id = ct.get("team_id")
@@ -1641,11 +1602,23 @@ def submit_guess_box(data):
             return
 
         ct["_special_bonus_awarded"] = True
-        ct["special_bonus_text"] = guess
-        ct["special_bonus_points"] = SECRET_BONUS_POINTS
         team["score"] = float(team.get("score", 0)) + SECRET_BONUS_POINTS
         ct["turn_points"] = float(ct.get("turn_points", 0)) + SECRET_BONUS_POINTS
 
+        socketio.emit(
+            "guess_boxes_update",
+            {"boxes": ct["guess_boxes"], "revisions": revisions},
+            room=room_id,
+        )
+        socketio.emit(
+            "secret_bonus_awarded",
+            {
+                "text": guess,
+                "points": SECRET_BONUS_POINTS,
+                "turn_number": ct.get("turn_number"),
+            },
+            to=request.sid,
+        )
         socketio.emit(
             "guess_box_result",
             {
@@ -1654,10 +1627,27 @@ def submit_guess_box(data):
                 "revision": revision,
                 "clear": True,
             },
-            room=room_id,
+            to=request.sid,
         )
         socketio.emit("score_update", {"teams": room.get("teams", [])}, room=room_id)
         broadcast_room(room_id)
+        return
+
+    revisions[index] = revision
+    ct["guess_boxes"][index] = raw_guess
+    persist_room(room)
+    socketio.emit(
+        "guess_boxes_update",
+        {"boxes": ct["guess_boxes"], "revisions": revisions},
+        room=room_id,
+    )
+
+    if not guess:
+        socketio.emit(
+            "guess_box_result",
+            {"index": index, "status": "", "revision": revision},
+            room=room_id,
+        )
         return
 
     candidates = [w for w in ct["words"] if ct["word_status"].get(w) != "exact"]

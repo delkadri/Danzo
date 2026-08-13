@@ -93,6 +93,7 @@ export default function Game({ myId, room, roomId, onLeave }) {
   const [remaining, setRemaining] = useState(null);
   const [boxes, setBoxes] = useState(makeEmptyBoxes);
   const [localTurnStarted, setLocalTurnStarted] = useState(false);
+  const [privateSpecialBonus, setPrivateSpecialBonus] = useState(null);
 
   // countdown
   const [countdown, setCountdown] = useState(null);
@@ -131,9 +132,8 @@ export default function Game({ myId, room, roomId, onLeave }) {
   const lastTurnWordStatus = lastTurnSummary?.word_status || {};
   const lastTurnPoints =
     typeof lastTurnSummary?.points === "number" ? lastTurnSummary.points : null;
-  const lastTurnSpecialBonusText = lastTurnSummary?.special_bonus_text || "";
-  const lastTurnSpecialBonusPoints =
-    Number(lastTurnSummary?.special_bonus_points) || 0;
+  const lastTurnSpecialBonusText = privateSpecialBonus?.text || "";
+  const lastTurnSpecialBonusPoints = Number(privateSpecialBonus?.points) || 0;
 
   useEffect(() => {
     setLocalTurnStarted(!!ct.turn_started);
@@ -221,6 +221,7 @@ export default function Game({ myId, room, roomId, onLeave }) {
 
     function onTurnStarted() {
       setLocalTurnStarted(true);
+      setPrivateSpecialBonus(null);
     }
 
     function onTurnEnded() {
@@ -311,6 +312,13 @@ export default function Game({ myId, room, roomId, onLeave }) {
       }
     }
 
+    function onSecretBonusAwarded(payload) {
+      const text = typeof payload?.text === "string" ? payload.text.trim() : "";
+      const points = Number(payload?.points) || 0;
+      if (!text || points <= 0) return;
+      setPrivateSpecialBonus({ text, points });
+    }
+
     // ✅ after category chosen: reset UI + WAIT FOR difficulty selection
     function onCategoryChosen(payload) {
       const cat = payload?.category || chosenCategory;
@@ -323,6 +331,7 @@ export default function Game({ myId, room, roomId, onLeave }) {
       setRemaining(null);
       setCountdown(null);
       setCountdownDiff(null);
+      setPrivateSpecialBonus(null);
 
       if (countdownIntervalRef.current) {
         clearInterval(countdownIntervalRef.current);
@@ -340,6 +349,7 @@ export default function Game({ myId, room, roomId, onLeave }) {
       Object.values(submitTimersRef.current).forEach(clearTimeout);
       submitTimersRef.current = {};
       setRemaining(null);
+      setPrivateSpecialBonus(null);
 
       if (countdownIntervalRef.current) {
         clearInterval(countdownIntervalRef.current);
@@ -367,6 +377,7 @@ export default function Game({ myId, room, roomId, onLeave }) {
 
     socket.on("guess_boxes_update", onGuessBoxesUpdate);
     socket.on("guess_box_result", onGuessBoxResult);
+    socket.on("secret_bonus_awarded", onSecretBonusAwarded);
 
     socket.on("category_chosen", onCategoryChosen);
     socket.on("difficulty_chosen", onDifficultyChosen);
@@ -378,6 +389,7 @@ export default function Game({ myId, room, roomId, onLeave }) {
 
       socket.off("guess_boxes_update", onGuessBoxesUpdate);
       socket.off("guess_box_result", onGuessBoxResult);
+      socket.off("secret_bonus_awarded", onSecretBonusAwarded);
 
       socket.off("category_chosen", onCategoryChosen);
       socket.off("difficulty_chosen", onDifficultyChosen);
@@ -430,13 +442,6 @@ export default function Game({ myId, room, roomId, onLeave }) {
     const revision = latestRevisionRef.current[index] + 1;
     latestRevisionRef.current[index] = revision;
 
-    socket.emit("guess_boxes_typing", {
-      room_id: roomId,
-      index,
-      text: val,
-      revision,
-    });
-
     if (!composingRef.current[index]) {
       scheduleBoxSubmission(index, val, revision);
     }
@@ -474,8 +479,8 @@ export default function Game({ myId, room, roomId, onLeave }) {
     Math.max(0, (typeof remaining === "number" ? remaining : 0) / timeLimit)
   );
   const timerIsUrgent = typeof remaining === "number" && remaining <= 10;
-  const specialBonusText = ct.special_bonus_text || "";
-  const specialBonusPoints = Number(ct.special_bonus_points) || 0;
+  const specialBonusText = privateSpecialBonus?.text || "";
+  const specialBonusPoints = Number(privateSpecialBonus?.points) || 0;
 
   const onPlayAgain = () => {
     socket.emit("host_play_again", { room_id: roomId });
