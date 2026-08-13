@@ -63,6 +63,13 @@ class Config:
         "SOCKETIO_REDIS_CHANNEL",
         f"danzo-socketio-{DEPLOYMENT_ENV}",
     )
+    # Store only the SHA-256 digest so the hidden bonus word never ships to
+    # browsers or appears in server responses.
+    SECRET_BONUS_WORD_HASH = os.getenv(
+        "SECRET_BONUS_WORD_HASH",
+        "",
+    ).strip().lower()
+    SECRET_BONUS_POINTS = 15.0
 
     SQLALCHEMY_DATABASE_URI = get_database_url()
     SQLALCHEMY_TRACK_MODIFICATIONS = False

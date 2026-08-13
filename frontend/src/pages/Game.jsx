@@ -131,6 +131,9 @@ export default function Game({ myId, room, roomId, onLeave }) {
   const lastTurnWordStatus = lastTurnSummary?.word_status || {};
   const lastTurnPoints =
     typeof lastTurnSummary?.points === "number" ? lastTurnSummary.points : null;
+  const lastTurnSpecialBonusText = lastTurnSummary?.special_bonus_text || "";
+  const lastTurnSpecialBonusPoints =
+    Number(lastTurnSummary?.special_bonus_points) || 0;
 
   useEffect(() => {
     setLocalTurnStarted(!!ct.turn_started);
@@ -262,6 +265,7 @@ export default function Game({ myId, room, roomId, onLeave }) {
       const idx = payload?.index;
       const status = payload?.status;
       const revision = payload?.revision;
+      const shouldClear = payload?.clear === true;
 
       if (typeof idx !== "number" || idx < 0 || idx > 4) return;
       if (Number.isInteger(revision) && revision < latestRevisionRef.current[idx]) {
@@ -274,11 +278,18 @@ export default function Game({ myId, room, roomId, onLeave }) {
         const cur = next[idx] || { text: "", status: "empty", locked: false };
 
         const nextStatus =
-          status === "exact" || status === "close" || status === "wrong"
+          shouldClear
+            ? "empty"
+            : status === "exact" || status === "close" || status === "wrong"
             ? status
             : (cur.text ? cur.status : "empty");
 
-        next[idx] = { ...cur, status: nextStatus, locked: shouldLock ? true : false };
+        next[idx] = {
+          ...cur,
+          text: shouldClear ? "" : cur.text,
+          status: nextStatus,
+          locked: shouldClear ? false : shouldLock,
+        };
         return next;
       });
 
@@ -457,6 +468,14 @@ export default function Game({ myId, room, roomId, onLeave }) {
   const inCountdown = typeof countdown === "number";
   const roundActive = !!chosenCategory && !!difficulty && !inCountdown;
   const showTurnControl = phase === "playing" && !roundActive && !inCountdown;
+  const timeLimit = Math.max(1, Number(room?.settings?.time_limit) || 50);
+  const timerProgress = Math.min(
+    1,
+    Math.max(0, (typeof remaining === "number" ? remaining : 0) / timeLimit)
+  );
+  const timerIsUrgent = typeof remaining === "number" && remaining <= 10;
+  const specialBonusText = ct.special_bonus_text || "";
+  const specialBonusPoints = Number(ct.special_bonus_points) || 0;
 
   const onPlayAgain = () => {
     socket.emit("host_play_again", { room_id: roomId });
@@ -509,11 +528,30 @@ export default function Game({ myId, room, roomId, onLeave }) {
 
         {roundActive && typeof remaining === "number" && (
           <div
-            className="sticky top-2 z-30 mt-3 flex items-center justify-between rounded-2xl bg-indigo-600 px-4 py-3 text-white shadow-lg shadow-indigo-950/20 sm:static"
+            className={`sticky top-2 z-30 mt-3 rounded-2xl px-4 py-3 text-white shadow-lg transition-colors sm:static ${
+              timerIsUrgent ? "bg-rose-600 shadow-rose-950/20" : "bg-indigo-600 shadow-indigo-950/20"
+            }`}
             aria-live="polite"
           >
-            <span className="text-sm font-semibold">Time remaining</span>
-            <span className="text-xl font-black tabular-nums">{remaining}s</span>
+            <div className="flex items-center justify-between">
+              <span className="text-sm font-semibold">Time remaining</span>
+              <span className="text-xl font-black tabular-nums">{remaining}s</span>
+            </div>
+            <div
+              className="mt-2 h-2 overflow-hidden rounded-full bg-black/20"
+              role="progressbar"
+              aria-label="Time remaining"
+              aria-valuemin={0}
+              aria-valuemax={timeLimit}
+              aria-valuenow={remaining}
+            >
+              <div
+                className={`h-full origin-left rounded-full transition-transform duration-1000 ease-linear ${
+                  timerIsUrgent ? "bg-yellow-300" : "bg-white"
+                }`}
+                style={{ transform: `scaleX(${timerProgress})` }}
+              />
+            </div>
           </div>
         )}
 
@@ -616,6 +654,14 @@ export default function Game({ myId, room, roomId, onLeave }) {
                       </div>
                     );
                   })}
+                  {lastTurnSpecialBonusText && (
+                    <div className="flex min-w-0 items-center justify-between gap-2 rounded-xl border border-rose-500/50 bg-rose-500/10 p-3 text-rose-700 dark:text-rose-300">
+                      <span className="min-w-0 truncate font-bold">{lastTurnSpecialBonusText}</span>
+                      <Badge className="shrink-0 border-rose-500/50 bg-rose-500/10 text-rose-700 dark:text-rose-300">
+                        +{formatPts(lastTurnSpecialBonusPoints)}
+                      </Badge>
+                    </div>
+                  )}
                 </div>
               </Card>
             )}
@@ -788,6 +834,17 @@ export default function Game({ myId, room, roomId, onLeave }) {
                       )}
                     </div>
                   ))}
+                  {specialBonusText && (
+                    <div
+                      className="flex min-h-[60px] min-w-0 items-center justify-between gap-2 overflow-hidden rounded-xl border border-rose-500/50 bg-rose-500/10 p-3 text-rose-700 ring-2 ring-rose-500/15 dark:text-rose-300"
+                      aria-live="polite"
+                    >
+                      <span className="min-w-0 truncate text-base font-bold">{specialBonusText}</span>
+                      <Badge className="shrink-0 border-rose-500/50 bg-rose-500/10 text-rose-700 dark:text-rose-300">
+                        +{formatPts(specialBonusPoints)}
+                      </Badge>
+                    </div>
+                  )}
                 </div>
 
                 <div className="mt-3 text-xs leading-5 text-zinc-500">

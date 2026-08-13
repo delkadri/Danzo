@@ -100,7 +100,17 @@
       "Practice",
       "Sprinting",
       "Team Spirit",
-      "Starter"
+      "Starter",
+      "Lionel Messi",
+      "Cristiano Ronaldo",
+      "Kylian Mbappe",
+      "Michael Jordan",
+      "Serena Williams",
+      "Usain Bolt",
+      "Mike Tyson",
+      "LeBron James",
+      "Tiger Woods",
+      "Zinedine Zidane"
     ],
     "medium": [
       "Goalkeeper",
@@ -202,7 +212,17 @@
       "Photo Finish",
       "Decathlon",
       "Heptathlon",
-      "Pentathlon"
+      "Pentathlon",
+      "Neymar",
+      "Roger Federer",
+      "Rafael Nadal",
+      "Novak Djokovic",
+      "Lewis Hamilton",
+      "Simone Biles",
+      "Stephen Curry",
+      "Tom Brady",
+      "Tony Parker",
+      "Teddy Riner"
     ],
     "hard": [
       "Decathlon",
@@ -304,7 +324,17 @@
       "Deuce",
       "Hawkeye",
       "Regatta",
-      "Omnium"
+      "Omnium",
+      "Ayrton Senna",
+      "Giannis Antetokounmpo",
+      "Eliud Kipchoge",
+      "Katie Ledecky",
+      "Megan Rapinoe",
+      "Israel Adesanya",
+      "Ronda Rousey",
+      "Jonah Lomu",
+      "Lindsey Vonn",
+      "Magnus Carlsen"
     ]
   },
   "song": {
@@ -408,7 +438,17 @@
       "Take Me Home Country Roads",
       "Happy Together",
       "Livin on a Prayer",
-      "Wonderwall"
+      "Wonderwall",
+      "Taylor Swift",
+      "Beyonce",
+      "Rihanna",
+      "Ed Sheeran",
+      "Michael Jackson",
+      "Adele",
+      "Justin Bieber",
+      "Bruno Mars",
+      "Lady Gaga",
+      "Shakira"
     ],
     "medium": [
       "Bohemian Rhapsody",
@@ -510,7 +550,17 @@
       "Dreams",
       "Go Your Own Way",
       "Free Fallin",
-      "American Pie"
+      "American Pie",
+      "Eminem",
+      "Drake",
+      "Ariana Grande",
+      "The Weeknd",
+      "Dua Lipa",
+      "Billie Eilish",
+      "Celine Dion",
+      "Snoop Dogg",
+      "Miley Cyrus",
+      "Jennifer Lopez"
     ],
     "hard": [
       "Rhapsody in Blue",
@@ -612,7 +662,17 @@
       "Owner of a Lonely Heart",
       "Redemption Song",
       "No Woman No Cry",
-      "Prelude in E Minor"
+      "Prelude in E Minor",
+      "Freddie Mercury",
+      "Elton John",
+      "Stevie Wonder",
+      "David Bowie",
+      "Bob Marley",
+      "Whitney Houston",
+      "Prince",
+      "Madonna",
+      "Aretha Franklin",
+      "Paul McCartney"
     ]
   },
   "movies": {
@@ -716,7 +776,17 @@
       "Madagascar 3",
       "Happy Feet",
       "The Lego Movie",
-      "Paddington 2"
+      "Paddington 2",
+      "Tom Cruise",
+      "Leonardo DiCaprio",
+      "Brad Pitt",
+      "Will Smith",
+      "Dwayne Johnson",
+      "Johnny Depp",
+      "Jackie Chan",
+      "Robert Downey Jr",
+      "Scarlett Johansson",
+      "Jennifer Aniston"
     ],
     "medium": [
       "Batman Begins",
@@ -818,7 +888,17 @@
       "Hereditary",
       "The Babadook",
       "Donnie Darko",
-      "Edge of Tomorrow"
+      "Edge of Tomorrow",
+      "Keanu Reeves",
+      "Margot Robbie",
+      "Ryan Reynolds",
+      "Morgan Freeman",
+      "Samuel L Jackson",
+      "Angelina Jolie",
+      "Natalie Portman",
+      "Chris Hemsworth",
+      "Zendaya",
+      "Emma Watson"
     ],
     "hard": [
       "2001 A Space Odyssey",
@@ -920,7 +1000,17 @@
       "A Woman Under the Influence",
       "Ordet",
       "Cleo from 5 to 7",
-      "Hiroshima Mon Amour"
+      "Hiroshima Mon Amour",
+      "Christopher Nolan",
+      "Quentin Tarantino",
+      "Steven Spielberg",
+      "Martin Scorsese",
+      "Wes Anderson",
+      "Guillermo del Toro",
+      "Pedro Almodovar",
+      "Sofia Coppola",
+      "Hayao Miyazaki",
+      "Bong Joon Ho"
     ]
   },
   "geography": {
@@ -1024,7 +1114,17 @@
       "Boston",
       "Seattle",
       "Orlando",
-      "Bali"
+      "Bali",
+      "Bear Grylls",
+      "David Attenborough",
+      "Jacques Cousteau",
+      "Amelia Earhart",
+      "Marco Polo",
+      "Steve Irwin",
+      "Greta Thunberg",
+      "Mike Horn",
+      "Thomas Pesquet",
+      "Jane Goodall"
     ],
     "medium": [
       "Beijing",
@@ -1126,7 +1226,17 @@
       "Busan",
       "Osaka",
       "Nagoya",
-      "Cebu"
+      "Cebu",
+      "Roald Amundsen",
+      "Edmund Hillary",
+      "Tenzing Norgay",
+      "James Cook",
+      "Amerigo Vespucci",
+      "David Livingstone",
+      "Alexandra David-Neel",
+      "Nicolas Vanier",
+      "Ranulph Fiennes",
+      "Sylvain Tesson"
     ],
     "hard": [
       "Amazon River",
@@ -1228,7 +1338,17 @@
       "Aleutian Islands",
       "Mariana Trench",
       "Ring of Fire",
-      "Great Dividing Range"
+      "Great Dividing Range",
+      "Ibn Battuta",
+      "Vasco da Gama",
+      "Ernest Shackleton",
+      "Thor Heyerdahl",
+      "Fridtjof Nansen",
+      "Alexander von Humboldt",
+      "Gerardus Mercator",
+      "Sacagawea",
+      "Matthew Henson",
+      "Reinhold Messner"
     ]
   },
   "history": {
@@ -1332,7 +1452,17 @@
       "Neil Armstrong",
       "Henry Ford",
       "Thomas Jefferson",
-      "Benjamin Franklin"
+      "Benjamin Franklin",
+      "Albert Einstein",
+      "Marie Curie",
+      "William Shakespeare",
+      "Adolf Hitler",
+      "Joseph Stalin",
+      "Queen Elizabeth II",
+      "Princess Diana",
+      "Barack Obama",
+      "Louis XIV",
+      "Marie Antoinette"
     ],
     "medium": [
       "Augustus",
@@ -1434,7 +1564,17 @@
       "Meiji Constitution",
       "Tokugawa Ieyasu",
       "Zheng He",
-      "Mughal Empire"
+      "Mughal Empire",
+      "Socrates",
+      "Plato",
+      "Aristotle",
+      "Michelangelo",
+      "Vincent van Gogh",
+      "Pablo Picasso",
+      "Karl Marx",
+      "Vladimir Lenin",
+      "Mao Zedong",
+      "Che Guevara"
     ],
     "hard": [
       "Peloponnesian War",
@@ -1536,7 +1676,17 @@
       "Sykes Picot Agreement",
       "Nanjing Massacre",
       "Operation Desert Storm",
-      "Treaty of Portsmouth"
+      "Treaty of Portsmouth",
+      "Hammurabi",
+      "Pericles",
+      "Marcus Aurelius",
+      "Saladin",
+      "Richard the Lionheart",
+      "Suleiman the Magnificent",
+      "Catherine the Great",
+      "Otto von Bismarck",
+      "Charles de Gaulle",
+      "Mustafa Kemal Ataturk"
     ]
   },
   "brand": {
